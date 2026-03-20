@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use sonor::{RepeatMode, Speaker};
 use tracing::warn;
 
+use crate::events::{AvtState, RcState};
+
 fn repeat_to_str(r: RepeatMode) -> &'static str {
     match r {
         RepeatMode::None => "none",
@@ -46,6 +48,53 @@ pub struct SpeakerState {
     /// Populated by bridge after zone_group_state() query.
     pub group_coordinator: Option<String>,
     pub group_members:     Vec<String>,
+}
+
+impl Default for SpeakerState {
+    fn default() -> Self {
+        Self {
+            playing:           false,
+            volume:            0,
+            muted:             false,
+            shuffle:           false,
+            repeat:            "none".to_string(),
+            title:             None,
+            artist:            None,
+            album:             None,
+            duration:          None,
+            position:          None,
+            bass:              0,
+            treble:            0,
+            loudness:          false,
+            group_coordinator: None,
+            group_members:     vec![],
+        }
+    }
+}
+
+impl SpeakerState {
+    /// Apply a partial AVTransport update in-place.
+    pub fn apply_avt(&mut self, avt: &AvtState) {
+        if let Some(v) = avt.playing  { self.playing = v; }
+        if let Some(v) = avt.shuffle  { self.shuffle = v; }
+        if let Some(ref v) = avt.repeat { self.repeat = v.clone(); }
+        if let Some(v) = avt.duration { self.duration = Some(v); }
+        if let Some(v) = avt.position { self.position = Some(v); }
+        if avt.track_info_present {
+            self.title  = avt.title.clone();
+            self.artist = avt.artist.clone();
+            self.album  = avt.album.clone();
+        }
+    }
+
+    /// Apply a partial RenderingControl update in-place.
+    pub fn apply_rc(&mut self, rc: &RcState) {
+        if let Some(v) = rc.volume   { self.volume   = v; }
+        if let Some(v) = rc.muted    { self.muted    = v; }
+        if let Some(v) = rc.bass     { self.bass     = v; }
+        if let Some(v) = rc.treble   { self.treble   = v; }
+        if let Some(v) = rc.loudness { self.loudness = v; }
+    }
 }
 
 /// Poll all state from a speaker in one pass.

@@ -2,9 +2,11 @@ mod api;
 mod bridge;
 mod config;
 mod discovery;
+mod events;
 mod homecore;
 mod shared_state;
 mod speaker;
+mod subscription;
 
 use anyhow::Result;
 use std::time::Duration;
@@ -117,13 +119,17 @@ async fn try_start(cfg: &SonosConfig) -> Result<()> {
         discovery_tx,
     );
 
+    // ── GENA event channel (Sonos → API handler → bridge) ────────────────
+    let (event_tx, event_rx) = mpsc::channel::<(String, events::NotifyEvent)>(256);
+
     // ── Spawn HTTP API server ──────────────────────────────────────────────
     if cfg.api.enabled {
         let api_state  = app_state.clone();
         let api_host   = cfg.api.host.clone();
         let api_port   = cfg.api.port;
+        let api_tx     = event_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = api::serve(&api_host, api_port, api_state).await {
+            if let Err(e) = api::serve(&api_host, api_port, api_state, api_tx).await {
                 error!(error = %e, "HTTP API server failed");
             }
         });
@@ -131,16 +137,16 @@ async fn try_start(cfg: &SonosConfig) -> Result<()> {
 
     info!(
         discovery_interval_secs = cfg.sonos.discovery_interval_secs,
-        poll_interval_secs      = cfg.sonos.poll_interval_secs,
         manual_hosts            = cfg.sonos.manual_hosts.len(),
         api_enabled             = cfg.api.enabled,
         api_port                = cfg.api.port,
-        "hc-sonos started"
+        callback_host           = cfg.api.callback_host.as_deref().unwrap_or("127.0.0.1"),
+        "hc-sonos started (GENA mode)"
     );
 
     // ── Run bridge (blocks until HomeCore channel closes) ─────────────────
     let bridge = bridge::Bridge::new(cfg, publisher, app_state);
-    bridge.run(discovery_rx, hc_rx).await;
+    bridge.run(discovery_rx, hc_rx, event_rx).await;
 
     Ok(())
 }

@@ -9,16 +9,18 @@
 //!   GET /pauseall
 
 use axum::{
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use serde_json::{json, Value};
 use sonor::{RepeatMode, Speaker};
-use tracing::warn;
+use tokio::sync::mpsc;
+use tracing::{debug, warn};
 
 use super::content;
+use crate::events::{self, NotifyEvent};
 use crate::shared_state::AppState;
 use crate::speaker;
 
@@ -654,4 +656,41 @@ pub async fn play_uri(
             Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// GENA NOTIFY callback
+// ---------------------------------------------------------------------------
+
+/// ANY /sonos/callback/:uuid/:service — receive UPnP GENA NOTIFY from Sonos.
+///
+/// Sonos sends `HTTP NOTIFY` (a non-standard HTTP method) to this endpoint.
+/// We parse the body, build a `NotifyEvent`, and forward it to the bridge via
+/// the mpsc channel.  We always return 200 OK so Sonos doesn't retry.
+pub async fn sonos_notify(
+    Path((uuid, service)): Path<(String, String)>,
+    Extension(event_tx): Extension<mpsc::Sender<(String, NotifyEvent)>>,
+    body: String,
+) -> StatusCode {
+    let event = match service.as_str() {
+        "avt" => events::parse_avt(&body).map(NotifyEvent::Avt),
+        "rc"  => events::parse_rc(&body).map(NotifyEvent::Rc),
+        other => {
+            warn!(uuid, service = other, "Unknown NOTIFY service");
+            return StatusCode::OK;
+        }
+    };
+
+    match event {
+        Some(ev) => {
+            debug!(uuid, service, "GENA NOTIFY received");
+            let _ = event_tx.try_send((uuid, ev));  // drop if bridge is busy
+        }
+        None => {
+            // Could be a subscription-confirmed NOTIFY with no LastChange — ignore.
+            debug!(uuid, service, "NOTIFY body had no parseable LastChange");
+        }
+    }
+
+    StatusCode::OK
 }

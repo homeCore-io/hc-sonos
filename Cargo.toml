@@ -22,5 +22,6 @@ tracing-appender   = "0.2"
 sonor              = "2.0"
 futures            = "0.3"
 axum               = "0.7"
+tower              = "0.4"
 tower-http         = { version = "0.5", features = ["cors", "trace"] }
 roxmltree          = "0.18"

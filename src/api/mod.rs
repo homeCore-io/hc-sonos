@@ -34,16 +34,22 @@
 pub mod content;
 pub mod handlers;
 
-use axum::{routing::get, Router};
+use axum::{routing::{any, get}, Router};
+use tokio::sync::mpsc;
+use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 
+use crate::events::NotifyEvent;
 use crate::shared_state::AppState;
 
 /// Build the Axum router.
-pub fn router(state: AppState) -> Router {
+pub fn router(state: AppState, event_tx: mpsc::Sender<(String, NotifyEvent)>) -> Router {
     use handlers::*;
 
     Router::new()
+        // ── GENA NOTIFY callback (used by Sonos to push state changes) ───────
+        .route("/sonos/callback/:uuid/:service", any(sonos_notify))
+
         // ── System ──────────────────────────────────────────────────────────
         .route("/zones",         get(zones))
         .route("/favorites",     get(all_favorites))
@@ -90,8 +96,8 @@ pub fn router(state: AppState) -> Router {
         .route("/:room/leave",        get(leave))
 
         // ── Per-room: queue mgmt ─────────────────────────────────────────────
-        .route("/:room/clearqueue",          get(clearqueue))
-        .route("/:room/queue/remove/:index", get(queue_remove))
+        .route("/:room/clearqueue",           get(clearqueue))
+        .route("/:room/queue/remove/:index",  get(queue_remove))
         .route("/:room/queue/adduri/:uri",    get(queue_add))
         .route("/:room/queue/addnexturi/:uri",get(queue_add_next))
 
@@ -100,17 +106,26 @@ pub fn router(state: AppState) -> Router {
         .route("/:room/playlist/:name", get(play_playlist))
         .route("/:room/playuri/:uri",   get(play_uri))
 
-        .layer(CorsLayer::permissive())
+        .layer(
+            ServiceBuilder::new()
+                .layer(axum::Extension(event_tx))
+                .layer(CorsLayer::permissive()),
+        )
         .with_state(state)
 }
 
 /// Start the HTTP server.  Returns an error only if the bind address is invalid.
-pub async fn serve(host: &str, port: u16, state: AppState) -> anyhow::Result<()> {
+pub async fn serve(
+    host:     &str,
+    port:     u16,
+    state:    AppState,
+    event_tx: mpsc::Sender<(String, NotifyEvent)>,
+) -> anyhow::Result<()> {
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await
         .map_err(|e| anyhow::anyhow!("API server bind {addr}: {e}"))?;
 
     tracing::info!(addr, "Sonos HTTP API listening");
-    axum::serve(listener, router(state)).await
+    axum::serve(listener, router(state, event_tx)).await
         .map_err(|e| anyhow::anyhow!("API server error: {e}"))
 }

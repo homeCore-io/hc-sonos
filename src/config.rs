@@ -99,14 +99,21 @@ pub struct ApiConfig {
     /// Set to false to disable the HTTP API entirely.
     #[serde(default = "default_api_enabled")]
     pub enabled: bool,
+    /// The IP or hostname Sonos speakers can reach to deliver GENA NOTIFY
+    /// callbacks.  Required when `host` is `"0.0.0.0"` (i.e. any interface).
+    /// Example: `callback_host = "192.168.1.10"`.
+    /// Defaults to `"127.0.0.1"` when not set (loopback only — useful for
+    /// local testing; set to your LAN IP in production).
+    pub callback_host: Option<String>,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            host:    default_api_host(),
-            port:    default_api_port(),
-            enabled: default_api_enabled(),
+            host:          default_api_host(),
+            port:          default_api_port(),
+            enabled:       default_api_enabled(),
+            callback_host: None,
         }
     }
 }
