@@ -32,19 +32,17 @@ async fn browse(speaker: &Speaker, object_id: &str) -> Result<Vec<Value>> {
     let args = browse_args(object_id);
     let mut resp = speaker.action(&cd_urn(), "Browse", &args).await?;
     let xml = resp.remove("Result").unwrap_or_default();
-    Ok(parse_didl(&xml))
+    parse_didl(&xml)
 }
 
 /// Parse DIDL-Lite XML into a vec of JSON objects.
 /// Each object has: title, uri, albumArtUri (optional), metadata (raw item XML
 /// wrapped in a DIDL-Lite envelope — needed to play the item back).
-fn parse_didl(xml: &str) -> Vec<Value> {
-    let doc = match roxmltree::Document::parse(xml) {
-        Ok(d) => d,
-        Err(_) => return vec![],
-    };
+fn parse_didl(xml: &str) -> Result<Vec<Value>> {
+    let doc = roxmltree::Document::parse(xml)
+        .map_err(|e| anyhow::anyhow!("DIDL-Lite parse error: {e}\nXML: {xml}"))?;
 
-    doc.root_element()
+    let items = doc.root_element()
         .children()
         .filter(|n| n.is_element())
         .map(|item| {
@@ -64,16 +62,15 @@ fn parse_didl(xml: &str) -> Vec<Value> {
             // Reconstruct item XML for use as DIDL-Lite metadata when playing
             let item_xml = node_to_xml(item);
             let metadata = format!(
-                r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" \
-xmlns:dc="http://purl.org/dc/elements/1.1/" \
-xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">{item_xml}</DIDL-Lite>"#
+                r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">{item_xml}</DIDL-Lite>"#
             );
 
             let mut obj = json!({ "title": title, "uri": uri, "metadata": metadata });
             if let Some(a) = art { obj["albumArtUri"] = json!(a); }
             obj
         })
-        .collect()
+        .collect::<Vec<_>>();
+    Ok(items)
 }
 
 /// Serialize a roxmltree Node back to an XML string (best-effort, no namespace re-declaration).
