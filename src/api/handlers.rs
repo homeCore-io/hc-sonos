@@ -321,6 +321,26 @@ pub async fn togglemute(Path(room): Path<String>, State(state): State<AppState>)
 // EQ
 // ---------------------------------------------------------------------------
 
+pub async fn loudness(
+    Path((room, mode)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Response {
+    let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
+    let value = match mode.as_str() {
+        "on"     => true,
+        "off"    => false,
+        "toggle" => match sp.loudness().await {
+            Ok(v) => !v,
+            Err(e) => return err_resp(StatusCode::BAD_GATEWAY, e),
+        },
+        _ => return bad_req("loudness state must be on/off/toggle"),
+    };
+    match sp.set_loudness(value).await {
+        Ok(()) => Json(json!({"status": "success", "loudness": value})).into_response(),
+        Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
+    }
+}
+
 pub async fn bass(
     Path((room, level)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -435,6 +455,20 @@ pub async fn seek(
     }
 }
 
+pub async fn seekby(
+    Path((room, secs)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Response {
+    let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
+    match secs.parse::<i32>() {
+        Err(_) => bad_req("offset must be an integer (positive or negative seconds)"),
+        Ok(s) => match sp.skip_by(s).await {
+            Ok(()) => ok(),
+            Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
+        }
+    }
+}
+
 pub async fn trackseek(
     Path((room, index)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -509,6 +543,47 @@ pub async fn queue(Path(room): Path<String>, State(state): State<AppState>) -> R
 pub async fn clearqueue(Path(room): Path<String>, State(state): State<AppState>) -> Response {
     let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
     match sp.clear_queue().await { Ok(()) => ok(), Err(e) => err_resp(StatusCode::BAD_GATEWAY, e) }
+}
+
+/// GET /:room/queue/remove/:index — remove a track from the queue by 1-based track number.
+pub async fn queue_remove(
+    Path((room, index)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Response {
+    let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
+    match index.parse::<u32>() {
+        Err(_) => bad_req("track index must be an integer"),
+        Ok(i) => match sp.remove_track(i).await {
+            Ok(()) => ok(),
+            Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
+        }
+    }
+}
+
+/// GET /:room/queue/adduri/:uri — add a URI to the end of the queue.
+pub async fn queue_add(
+    Path((room, uri)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Response {
+    let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
+    let uri = uri.replace('&', "&amp;");
+    match sp.queue_end(&uri, "").await {
+        Ok(()) => ok(),
+        Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
+    }
+}
+
+/// GET /:room/queue/addnexturi/:uri — add a URI to play next in the queue.
+pub async fn queue_add_next(
+    Path((room, uri)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Response {
+    let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
+    let uri = uri.replace('&', "&amp;");
+    match sp.queue_next(&uri, "").await {
+        Ok(()) => ok(),
+        Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -11,15 +11,20 @@
 //!   GET /:room/{mute,unmute,togglemute}
 //!   GET /:room/bass/:level
 //!   GET /:room/treble/:level
+//!   GET /:room/loudness/:state         (on/off/toggle)
 //!   GET /:room/shuffle/:state          (on/off/toggle)
 //!   GET /:room/repeat/:state           (on/off/one/toggle)
 //!   GET /:room/crossfade/:state        (on/off/toggle)
 //!   GET /:room/seek/:seconds
+//!   GET /:room/seekby/:seconds          (relative, ±N)
 //!   GET /:room/trackseek/:index
 //!   GET /:room/join/:target
 //!   GET /:room/leave
 //!   GET /:room/queue
 //!   GET /:room/clearqueue
+//!   GET /:room/queue/remove/:index
+//!   GET /:room/queue/adduri/:uri
+//!   GET /:room/queue/addnexturi/:uri
 //!   GET /:room/favorites
 //!   GET /:room/playlists
 //!   GET /:room/favorite/:name
@@ -66,8 +71,9 @@ pub fn router(state: AppState) -> Router {
         .route("/:room/togglemute",     get(togglemute))
 
         // ── Per-room: EQ ────────────────────────────────────────────────────
-        .route("/:room/bass/:level",    get(bass))
-        .route("/:room/treble/:level",  get(treble))
+        .route("/:room/bass/:level",     get(bass))
+        .route("/:room/treble/:level",   get(treble))
+        .route("/:room/loudness/:state", get(loudness))
 
         // ── Per-room: play modes ─────────────────────────────────────────────
         .route("/:room/shuffle/:state",   get(shuffle))
@@ -76,6 +82,7 @@ pub fn router(state: AppState) -> Router {
 
         // ── Per-room: seek ───────────────────────────────────────────────────
         .route("/:room/seek/:seconds",    get(seek))
+        .route("/:room/seekby/:seconds",  get(seekby))
         .route("/:room/trackseek/:index", get(trackseek))
 
         // ── Per-room: grouping ───────────────────────────────────────────────
@@ -83,7 +90,10 @@ pub fn router(state: AppState) -> Router {
         .route("/:room/leave",        get(leave))
 
         // ── Per-room: queue mgmt ─────────────────────────────────────────────
-        .route("/:room/clearqueue",   get(clearqueue))
+        .route("/:room/clearqueue",          get(clearqueue))
+        .route("/:room/queue/remove/:index", get(queue_remove))
+        .route("/:room/queue/adduri/:uri",    get(queue_add))
+        .route("/:room/queue/addnexturi/:uri",get(queue_add_next))
 
         // ── Per-room: content ────────────────────────────────────────────────
         .route("/:room/favorite/:name", get(play_favorite))
