@@ -109,26 +109,20 @@ pub async fn list_playlists(speaker: &Speaker) -> Result<Vec<Value>> {
     browse(speaker, "SQ:").await
 }
 
-/// Find a favorite by name (case-insensitive) and return (uri, metadata).
-pub async fn find_favorite(speaker: &Speaker, name: &str) -> Result<Option<(String, String)>> {
-    let items = list_favorites(speaker).await?;
-    let lower = name.to_lowercase();
-    Ok(items.into_iter().find(|item| {
-        item["title"].as_str().map(|t| t.to_lowercase() == lower).unwrap_or(false)
-    }).map(|item| {
+/// Get a favorite by 0-based index (matches position in /favorites output).
+pub async fn get_favorite_by_index(speaker: &Speaker, index: usize) -> Result<Option<(String, String)>> {
+    let mut items = list_favorites(speaker).await?;
+    Ok(items.get_mut(index).map(|item| {
         let uri      = item["uri"].as_str().unwrap_or("").to_string();
         let metadata = item["metadata"].as_str().unwrap_or("").to_string();
         (uri, metadata)
     }))
 }
 
-/// Find a Sonos playlist by name (case-insensitive) and return (uri, metadata).
-pub async fn find_playlist(speaker: &Speaker, name: &str) -> Result<Option<(String, String)>> {
-    let items = list_playlists(speaker).await?;
-    let lower = name.to_lowercase();
-    Ok(items.into_iter().find(|item| {
-        item["title"].as_str().map(|t| t.to_lowercase() == lower).unwrap_or(false)
-    }).map(|item| {
+/// Get a Sonos playlist by 0-based index (matches position in /playlists output).
+pub async fn get_playlist_by_index(speaker: &Speaker, index: usize) -> Result<Option<(String, String)>> {
+    let mut items = list_playlists(speaker).await?;
+    Ok(items.get_mut(index).map(|item| {
         let uri      = item["uri"].as_str().unwrap_or("").to_string();
         let metadata = item["metadata"].as_str().unwrap_or("").to_string();
         (uri, metadata)

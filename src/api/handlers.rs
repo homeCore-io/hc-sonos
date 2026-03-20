@@ -515,15 +515,19 @@ pub async fn clearqueue(Path(room): Path<String>, State(state): State<AppState>)
 // Favorites & playlists playback
 // ---------------------------------------------------------------------------
 
-/// GET /:room/favorite/:name — find and play a Sonos favorite.
+/// GET /:room/favorite/:index — play a Sonos favorite by 0-based index from /favorites.
 pub async fn play_favorite(
-    Path((room, name)): Path<(String, String)>,
+    Path((room, index)): Path<(String, String)>,
     State(state): State<AppState>,
 ) -> Response {
+    let idx: usize = match index.parse() {
+        Ok(n) => n,
+        Err(_) => return bad_req("favorite index must be an integer (see /favorites for list)"),
+    };
     let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
-    match content::find_favorite(&sp, &name).await {
+    match content::get_favorite_by_index(&sp, idx).await {
         Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
-        Ok(None) => not_found("favorite"),
+        Ok(None) => not_found("favorite at that index"),
         Ok(Some((uri, metadata))) => {
             match sp.set_transport_uri(&uri, &metadata).await {
                 Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
@@ -536,15 +540,19 @@ pub async fn play_favorite(
     }
 }
 
-/// GET /:room/playlist/:name — find and play a Sonos playlist.
+/// GET /:room/playlist/:index — play a Sonos playlist by 0-based index from /playlists.
 pub async fn play_playlist(
-    Path((room, name)): Path<(String, String)>,
+    Path((room, index)): Path<(String, String)>,
     State(state): State<AppState>,
 ) -> Response {
+    let idx: usize = match index.parse() {
+        Ok(n) => n,
+        Err(_) => return bad_req("playlist index must be an integer (see /playlists for list)"),
+    };
     let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
-    match content::find_playlist(&sp, &name).await {
+    match content::get_playlist_by_index(&sp, idx).await {
         Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
-        Ok(None) => not_found("playlist"),
+        Ok(None) => not_found("playlist at that index"),
         Ok(Some((uri, metadata))) => {
             match sp.set_transport_uri(&uri, &metadata).await {
                 Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
