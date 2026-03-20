@@ -5,8 +5,8 @@ plugin_id   = "plugin.sonos"
 # password  = ""
 
 [sonos]
-discovery_interval_secs  = 60   # how often to re-run SSDP scan
-poll_interval_secs        = 5    # how often to poll each speaker for state
+discovery_interval_secs  = 90   # how often to re-run SSDP scan
+poll_interval_secs        = 60    # how often to poll each speaker for state
 discovery_timeout_secs    = 5    # SSDP scan duration
 # manual_hosts = ["192.168.1.50", "192.168.1.51"]
 
@@ -25,3 +25,8 @@ discovery_timeout_secs    = 5    # SSDP scan duration
 # hc_id = "sonos_kitchen"
 # name  = "Kitchen"
 # area  = "kitchen"
+
+[api]
+host    = "0.0.0.0"
+port    = 5005
+enabled = true

@@ -21,3 +21,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "regist
 tracing-appender   = "0.2"
 sonor              = "2.0"
 futures            = "0.3"
+axum               = "0.7"
+tower-http         = { version = "0.5", features = ["cors", "trace"] }
+roxmltree          = "0.18"

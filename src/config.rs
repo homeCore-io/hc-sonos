@@ -10,6 +10,8 @@ pub struct SonosConfig {
     #[serde(default)]
     pub sonos: SonosSection,
     #[serde(default)]
+    pub api: ApiConfig,
+    #[serde(default)]
     pub devices: Vec<DeviceConfig>,
 }
 
@@ -86,8 +88,34 @@ pub struct DeviceConfig {
     pub area: Option<String>,
 }
 
+/// HTTP API configuration.  The API runs its own Axum server, completely
+/// independent of HomeCore.  Disable with `enabled = false`.
+#[derive(Deserialize, Clone, Debug)]
+pub struct ApiConfig {
+    #[serde(default = "default_api_host")]
+    pub host: String,
+    #[serde(default = "default_api_port")]
+    pub port: u16,
+    /// Set to false to disable the HTTP API entirely.
+    #[serde(default = "default_api_enabled")]
+    pub enabled: bool,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            host:    default_api_host(),
+            port:    default_api_port(),
+            enabled: default_api_enabled(),
+        }
+    }
+}
+
 // ── defaults ─────────────────────────────────────────────────────────────────
 
+fn default_api_host()               -> String { "0.0.0.0".into() }
+fn default_api_port()               -> u16    { 5005 }
+fn default_api_enabled()            -> bool   { true }
 fn default_broker_host()            -> String { "127.0.0.1".into() }
 fn default_broker_port()            -> u16    { 1883 }
 fn default_plugin_id()              -> String { "plugin.sonos".into() }

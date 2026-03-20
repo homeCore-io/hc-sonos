@@ -1,0 +1,136 @@
+//! Content Directory browsing — favorites, playlists, queue.
+//!
+//! Uses the raw `speaker.action()` UPnP call to browse the Sonos
+//! ContentDirectory service.  Results are parsed from DIDL-Lite XML.
+
+use anyhow::Result;
+use serde_json::{json, Value};
+use sonor::{rupnp::ssdp::URN, Speaker};
+
+// ContentDirectory:1 URN
+fn cd_urn() -> URN {
+    URN::service("schemas-upnp-org", "ContentDirectory", 1)
+}
+
+fn browse_args(object_id: &str) -> String {
+    format!(
+        "<ObjectID>{object_id}</ObjectID>\
+         <BrowseFlag>BrowseDirectChildren</BrowseFlag>\
+         <Filter>*</Filter>\
+         <StartingIndex>0</StartingIndex>\
+         <RequestedCount>200</RequestedCount>\
+         <SortCriteria></SortCriteria>"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Browse helpers
+// ---------------------------------------------------------------------------
+
+/// Browse a ContentDirectory container and return parsed items.
+async fn browse(speaker: &Speaker, object_id: &str) -> Result<Vec<Value>> {
+    let args = browse_args(object_id);
+    let mut resp = speaker.action(&cd_urn(), "Browse", &args).await?;
+    let xml = resp.remove("Result").unwrap_or_default();
+    Ok(parse_didl(&xml))
+}
+
+/// Parse DIDL-Lite XML into a vec of JSON objects.
+/// Each object has: title, uri, albumArtUri (optional), metadata (raw item XML
+/// wrapped in a DIDL-Lite envelope — needed to play the item back).
+fn parse_didl(xml: &str) -> Vec<Value> {
+    let doc = match roxmltree::Document::parse(xml) {
+        Ok(d) => d,
+        Err(_) => return vec![],
+    };
+
+    doc.root_element()
+        .children()
+        .filter(|n| n.is_element())
+        .map(|item| {
+            let mut title = String::new();
+            let mut uri   = String::new();
+            let mut art: Option<String> = None;
+
+            for child in item.children().filter(|n| n.is_element()) {
+                match child.tag_name().name() {
+                    "title"       => title = child.text().unwrap_or("").to_string(),
+                    "albumArtURI" => art   = child.text().map(str::to_string),
+                    "res"         => uri   = child.text().unwrap_or("").to_string(),
+                    _ => {}
+                }
+            }
+
+            // Reconstruct item XML for use as DIDL-Lite metadata when playing
+            let item_xml = node_to_xml(item);
+            let metadata = format!(
+                r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" \
+xmlns:dc="http://purl.org/dc/elements/1.1/" \
+xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">{item_xml}</DIDL-Lite>"#
+            );
+
+            let mut obj = json!({ "title": title, "uri": uri, "metadata": metadata });
+            if let Some(a) = art { obj["albumArtUri"] = json!(a); }
+            obj
+        })
+        .collect()
+}
+
+/// Serialize a roxmltree Node back to an XML string (best-effort, no namespace re-declaration).
+fn node_to_xml(node: roxmltree::Node) -> String {
+    let tag = node.tag_name().name();
+    let mut s = format!("<{tag}");
+    for attr in node.attributes() {
+        s.push_str(&format!(" {}=\"{}\"", attr.name(), attr.value()));
+    }
+    s.push('>');
+    for child in node.children() {
+        if child.is_text() {
+            s.push_str(child.text().unwrap_or(""));
+        } else if child.is_element() {
+            s.push_str(&node_to_xml(child));
+        }
+    }
+    s.push_str(&format!("</{tag}>"));
+    s
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// List Sonos Favorites (FV:2).
+pub async fn list_favorites(speaker: &Speaker) -> Result<Vec<Value>> {
+    browse(speaker, "FV:2").await
+}
+
+/// List Sonos Playlists (SQ:).
+pub async fn list_playlists(speaker: &Speaker) -> Result<Vec<Value>> {
+    browse(speaker, "SQ:").await
+}
+
+/// Find a favorite by name (case-insensitive) and return (uri, metadata).
+pub async fn find_favorite(speaker: &Speaker, name: &str) -> Result<Option<(String, String)>> {
+    let items = list_favorites(speaker).await?;
+    let lower = name.to_lowercase();
+    Ok(items.into_iter().find(|item| {
+        item["title"].as_str().map(|t| t.to_lowercase() == lower).unwrap_or(false)
+    }).map(|item| {
+        let uri      = item["uri"].as_str().unwrap_or("").to_string();
+        let metadata = item["metadata"].as_str().unwrap_or("").to_string();
+        (uri, metadata)
+    }))
+}
+
+/// Find a Sonos playlist by name (case-insensitive) and return (uri, metadata).
+pub async fn find_playlist(speaker: &Speaker, name: &str) -> Result<Option<(String, String)>> {
+    let items = list_playlists(speaker).await?;
+    let lower = name.to_lowercase();
+    Ok(items.into_iter().find(|item| {
+        item["title"].as_str().map(|t| t.to_lowercase() == lower).unwrap_or(false)
+    }).map(|item| {
+        let uri      = item["uri"].as_str().unwrap_or("").to_string();
+        let metadata = item["metadata"].as_str().unwrap_or("").to_string();
+        (uri, metadata)
+    }))
+}

@@ -1,7 +1,9 @@
+mod api;
 mod bridge;
 mod config;
 mod discovery;
 mod homecore;
+mod shared_state;
 mod speaker;
 
 use anyhow::Result;
@@ -93,6 +95,9 @@ fn init_logging(config_path: &str) -> tracing_appender::non_blocking::WorkerGuar
 // ---------------------------------------------------------------------------
 
 async fn try_start(cfg: &SonosConfig) -> Result<()> {
+    // ── Shared Sonos speaker state (bridge + HTTP API) ─────────────────────
+    let app_state = shared_state::new_state();
+
     // ── HomeCore MQTT ─────────────────────────────────────────────────────
     let hc_client = homecore::HomecoreClient::connect(&cfg.homecore).await?;
     let publisher = hc_client.publisher();
@@ -112,15 +117,29 @@ async fn try_start(cfg: &SonosConfig) -> Result<()> {
         discovery_tx,
     );
 
+    // ── Spawn HTTP API server ──────────────────────────────────────────────
+    if cfg.api.enabled {
+        let api_state  = app_state.clone();
+        let api_host   = cfg.api.host.clone();
+        let api_port   = cfg.api.port;
+        tokio::spawn(async move {
+            if let Err(e) = api::serve(&api_host, api_port, api_state).await {
+                error!(error = %e, "HTTP API server failed");
+            }
+        });
+    }
+
     info!(
         discovery_interval_secs = cfg.sonos.discovery_interval_secs,
         poll_interval_secs      = cfg.sonos.poll_interval_secs,
         manual_hosts            = cfg.sonos.manual_hosts.len(),
+        api_enabled             = cfg.api.enabled,
+        api_port                = cfg.api.port,
         "hc-sonos started"
     );
 
     // ── Run bridge (blocks until HomeCore channel closes) ─────────────────
-    let bridge = bridge::Bridge::new(cfg, publisher);
+    let bridge = bridge::Bridge::new(cfg, publisher, app_state);
     bridge.run(discovery_rx, hc_rx).await;
 
     Ok(())
