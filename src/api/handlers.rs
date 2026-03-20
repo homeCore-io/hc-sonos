@@ -571,6 +571,7 @@ pub async fn play_uri(
     State(state): State<AppState>,
 ) -> Response {
     let sp = match get_speaker(&state, &room).await { Ok(s) => s, Err(r) => return r };
+    let uri = uri.replace('&', "&amp;");
     match sp.set_transport_uri(&uri, "").await {
         Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
         Ok(()) => match sp.play().await {
