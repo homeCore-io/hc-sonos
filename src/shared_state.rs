@@ -51,10 +51,7 @@ impl SharedState {
         self.speakers.get(uuid)
     }
 
-    /// Return all UUIDs.
-    pub fn uuids(&self) -> Vec<String> {
-        self.speakers.keys().cloned().collect()
-    }
+
 }
 
 pub type AppState = Arc<RwLock<SharedState>>;

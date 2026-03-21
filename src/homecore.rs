@@ -34,16 +34,6 @@ impl HomecorePublisher {
             .context("publish_state failed")
     }
 
-    /// Publish a partial JSON merge-patch (not retained).
-    pub async fn publish_state_partial(&self, device_id: &str, patch: &Value) -> Result<()> {
-        let topic   = format!("homecore/devices/{device_id}/state/partial");
-        let payload = serde_json::to_vec(patch)?;
-        self.client
-            .publish(&topic, QoS::AtLeastOnce, false, payload)
-            .await
-            .context("publish_state_partial failed")
-    }
-
     /// Publish `"online"` or `"offline"` to the availability topic (retained).
     pub async fn publish_availability(&self, device_id: &str, online: bool) -> Result<()> {
         let topic   = format!("homecore/devices/{device_id}/availability");

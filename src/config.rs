@@ -51,9 +51,6 @@ pub struct SonosSection {
     /// How often to re-run SSDP discovery (seconds).
     #[serde(default = "default_discovery_interval_secs")]
     pub discovery_interval_secs: u64,
-    /// How often to poll each speaker for state changes (seconds).
-    #[serde(default = "default_poll_interval_secs")]
-    pub poll_interval_secs: u64,
     /// SSDP scan duration (seconds).
     #[serde(default = "default_discovery_timeout_secs")]
     pub discovery_timeout_secs: u64,
@@ -66,7 +63,6 @@ impl Default for SonosSection {
     fn default() -> Self {
         Self {
             discovery_interval_secs: default_discovery_interval_secs(),
-            poll_interval_secs:      default_poll_interval_secs(),
             discovery_timeout_secs:  default_discovery_timeout_secs(),
             manual_hosts:            vec![],
         }
@@ -127,5 +123,4 @@ fn default_broker_host()            -> String { "127.0.0.1".into() }
 fn default_broker_port()            -> u16    { 1883 }
 fn default_plugin_id()              -> String { "plugin.sonos".into() }
 fn default_discovery_interval_secs() -> u64   { 60 }
-fn default_poll_interval_secs()     -> u64    { 5 }
 fn default_discovery_timeout_secs() -> u64    { 5 }
