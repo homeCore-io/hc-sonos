@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::task::AbortHandle;
 
 use sonor::Speaker;
 
@@ -17,12 +18,15 @@ use crate::speaker::SpeakerState;
 // ---------------------------------------------------------------------------
 
 pub struct SpeakerEntry {
-    pub speaker:    Speaker,
-    pub uuid:       String,
-    pub hc_id:      String,
-    pub room_name:  String,
-    pub available:  bool,
-    pub last_state: Option<SpeakerState>,
+    pub speaker:     Speaker,
+    pub uuid:        String,
+    pub hc_id:       String,
+    pub room_name:   String,
+    pub available:   bool,
+    pub last_state:  Option<SpeakerState>,
+    /// Abort handles for the two GENA subscription loops (AVTransport, RenderingControl).
+    /// Stored so old loops can be cancelled before spawning new ones on re-subscribe.
+    pub sub_handles: Option<[AbortHandle; 2]>,
 }
 
 // ---------------------------------------------------------------------------

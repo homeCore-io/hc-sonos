@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::task::AbortHandle;
 use tracing::{debug, warn};
 
 const LEASE_SECS:  u32 = 300;
@@ -21,22 +22,28 @@ const RETRY_AFTER: u64 = 30;  // back-off after a failed SUBSCRIBE
 /// `uuid`              — Sonos speaker UUID (embedded in the callback URL path)
 /// `callback_base`     — e.g. `"http://192.168.1.10:5005"` (reachable by Sonos)
 ///
-/// Spawns two background tasks (one per service) that live for the process
-/// lifetime.  The tasks retry automatically on failure.
-pub fn subscribe_speaker(speaker_host_port: String, uuid: String, callback_base: String) {
-    spawn_loop(
+/// Spawns two background tasks (one per service).  Returns their `AbortHandle`s
+/// so the caller can cancel them before re-subscribing (prevents duplicate loops
+/// from accumulating across re-discoveries and heartbeat recoveries).
+pub fn subscribe_speaker(
+    speaker_host_port: String,
+    uuid:              String,
+    callback_base:     String,
+) -> [AbortHandle; 2] {
+    let avt = spawn_loop(
         speaker_host_port.clone(),
         "/MediaRenderer/AVTransport/Event",
         format!("{callback_base}/sonos/callback/{uuid}/avt"),
     );
-    spawn_loop(
+    let rc = spawn_loop(
         speaker_host_port,
         "/MediaRenderer/RenderingControl/Event",
         format!("{callback_base}/sonos/callback/{uuid}/rc"),
     );
+    [avt, rc]
 }
 
-fn spawn_loop(host_port: String, event_path: &'static str, callback_url: String) {
+fn spawn_loop(host_port: String, event_path: &'static str, callback_url: String) -> AbortHandle {
     tokio::spawn(async move {
         let mut sid: Option<String> = None;
         loop {
@@ -72,7 +79,7 @@ fn spawn_loop(host_port: String, event_path: &'static str, callback_url: String)
                 }
             }
         }
-    });
+    }).abort_handle()
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────

@@ -96,22 +96,33 @@ impl Bridge {
             Err(e) => { warn!(error = %e, "Could not get UUID; skipping"); return; }
         };
 
-        // If already known, just refresh the handle (IP may have changed).
-        {
-            let mut st = self.state.write().await;
-            if let Some(entry) = st.speakers.get_mut(&uuid) {
-                entry.speaker = speaker.clone();
-                debug!(uuid, "Refreshed speaker handle");
-            }
-        }
-
-        // Check if already registered
-        let already_known = self.state.read().await.speakers.contains_key(&uuid);
+        // If already known, just refresh the handle (IP may have changed) and
+        // re-subscribe — but abort the old loops first to prevent duplicate tasks.
+        let already_known = {
+            let st = self.state.read().await;
+            st.speakers.contains_key(&uuid)
+        };
 
         if already_known {
-            // Re-subscribe in case we lost the subscription (e.g. speaker rebooted).
+            let old_handles = {
+                let mut st = self.state.write().await;
+                if let Some(entry) = st.speakers.get_mut(&uuid) {
+                    entry.speaker = speaker.clone();
+                    debug!(uuid, "Refreshed speaker handle");
+                    entry.sub_handles.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(handles) = old_handles {
+                for h in handles { h.abort(); }
+            }
             let host_port = speaker_host_port(&speaker);
-            subscription::subscribe_speaker(host_port, uuid, self.callback_base.clone());
+            let handles = subscription::subscribe_speaker(host_port, uuid.clone(), self.callback_base.clone());
+            let mut st = self.state.write().await;
+            if let Some(entry) = st.speakers.get_mut(&uuid) {
+                entry.sub_handles = Some(handles);
+            }
             return;
         }
 
@@ -151,17 +162,22 @@ impl Bridge {
             }
         };
 
+        // Subscribe to GENA events from this speaker.
+        let host_port = speaker_host_port(&speaker);
+        let sub_handles = subscription::subscribe_speaker(host_port, uuid.clone(), self.callback_base.clone());
+
         {
             let mut st = self.state.write().await;
             st.uuid_to_room.insert(uuid.clone(), room_name.clone());
             st.room_to_uuid.insert(room_name.to_lowercase(), uuid.clone());
             st.speakers.insert(uuid.clone(), SpeakerEntry {
-                speaker: speaker.clone(),
-                uuid:      uuid.clone(),
-                hc_id:     hc_id.clone(),
+                speaker:     speaker.clone(),
+                uuid:        uuid.clone(),
+                hc_id:       hc_id.clone(),
                 room_name,
-                available: true,
-                last_state: initial_state.clone(),
+                available:   true,
+                last_state:  initial_state.clone(),
+                sub_handles: Some(sub_handles),
             });
         }
         self.hc_to_uuid.insert(hc_id.clone(), uuid.clone());
@@ -176,10 +192,6 @@ impl Bridge {
                 }
             });
         }
-
-        // Subscribe to GENA events from this speaker.
-        let host_port = speaker_host_port(&speaker);
-        subscription::subscribe_speaker(host_port, uuid, self.callback_base.clone());
     }
 
     // ── GENA event handling ───────────────────────────────────────────────────
@@ -275,13 +287,26 @@ impl Bridge {
                         tokio::spawn(async move {
                             let _ = pub2.publish_availability(&hc2, true).await;
                         });
-                        // Re-subscribe to restore GENA delivery.
+                        // Abort old subscription loops before spawning new ones.
+                        let old_handles = {
+                            let mut st = self.state.write().await;
+                            st.speakers.get_mut(&uuid).and_then(|e| e.sub_handles.take())
+                        };
+                        if let Some(handles) = old_handles {
+                            for h in handles { h.abort(); }
+                        }
                         let host_port = speaker_host_port(&speaker);
-                        subscription::subscribe_speaker(
+                        let sub_handles = subscription::subscribe_speaker(
                             host_port,
                             uuid.clone(),
                             self.callback_base.clone(),
                         );
+                        {
+                            let mut st = self.state.write().await;
+                            if let Some(entry) = st.speakers.get_mut(&uuid) {
+                                entry.sub_handles = Some(sub_handles);
+                            }
+                        }
                         // Fresh poll to get current state immediately.
                         if let Ok(state) = speaker::poll(&speaker).await {
                             let mut st = self.state.write().await;
