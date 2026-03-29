@@ -3,6 +3,8 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+use crate::logging::LoggingConfig;
+
 #[derive(Deserialize, Clone, Debug, Default)]
 pub struct SonosConfig {
     #[serde(default)]
@@ -13,6 +15,8 @@ pub struct SonosConfig {
     pub api: ApiConfig,
     #[serde(default)]
     pub devices: Vec<DeviceConfig>,
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 impl SonosConfig {
