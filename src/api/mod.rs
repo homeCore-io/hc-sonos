@@ -47,6 +47,8 @@ pub fn router(state: AppState, event_tx: mpsc::Sender<(String, NotifyEvent)>) ->
     use handlers::*;
 
     Router::new()
+        .route("/", get(landing))
+
         // ── GENA NOTIFY callback (used by Sonos to push state changes) ───────
         .route("/sonos/callback/:uuid/:service", any(sonos_notify))
 
