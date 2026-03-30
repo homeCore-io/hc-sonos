@@ -16,36 +16,43 @@ use sonor::Speaker;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use crate::api::content;
 use crate::config::{DeviceConfig, SonosConfig};
-use crate::events::{NotifyEvent};
+use crate::events::NotifyEvent;
 use crate::homecore::HomecorePublisher;
 use crate::shared_state::{AppState, SpeakerEntry};
 use crate::speaker::{self, SpeakerState};
 use crate::subscription;
 
-const HEARTBEAT_SECS: u64  = 60;
-const ZONE_POLL_SECS: u64  = 300;
+const HEARTBEAT_SECS: u64 = 60;
+const ZONE_POLL_SECS: u64 = 300;
+const CONTENT_POLL_SECS: u64 = 300;
 
 pub struct Bridge {
-    state:         AppState,
-    hc_to_uuid:    HashMap<String, String>,
-    config_map:    HashMap<String, DeviceConfig>,
-    publisher:     HomecorePublisher,
+    state: AppState,
+    hc_to_uuid: HashMap<String, String>,
+    config_map: HashMap<String, DeviceConfig>,
+    publisher: HomecorePublisher,
     /// Base URL for GENA callbacks, e.g. `"http://192.168.1.10:5005"`.
     callback_base: String,
 }
 
 impl Bridge {
     pub fn new(cfg: &SonosConfig, publisher: HomecorePublisher, state: AppState) -> Self {
-        let config_map = cfg.devices.iter()
+        let config_map = cfg
+            .devices
+            .iter()
             .map(|d| (d.uuid.clone(), d.clone()))
             .collect();
-        let callback_host = cfg.api.callback_host.clone()
+        let callback_host = cfg
+            .api
+            .callback_host
+            .clone()
             .unwrap_or_else(|| "127.0.0.1".to_string());
         let callback_base = format!("http://{}:{}", callback_host, cfg.api.port);
         Self {
             state,
-            hc_to_uuid:   HashMap::new(),
+            hc_to_uuid: HashMap::new(),
             config_map,
             publisher,
             callback_base,
@@ -55,15 +62,17 @@ impl Bridge {
     pub async fn run(
         mut self,
         mut discovery_rx: mpsc::Receiver<Speaker>,
-        mut homecore_rx:  mpsc::Receiver<(String, Value)>,
-        mut event_rx:     mpsc::Receiver<(String, NotifyEvent)>,
+        mut homecore_rx: mpsc::Receiver<(String, Value)>,
+        mut event_rx: mpsc::Receiver<(String, NotifyEvent)>,
     ) {
-        let mut heartbeat  = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECS));
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECS));
         let mut zone_timer = tokio::time::interval(Duration::from_secs(ZONE_POLL_SECS));
+        let mut content_timer = tokio::time::interval(Duration::from_secs(CONTENT_POLL_SECS));
         // Consume the immediate tick so we don't fire zone polling at startup
         // before any speakers are known.
         heartbeat.tick().await;
         zone_timer.tick().await;
+        content_timer.tick().await;
 
         info!("Bridge event loop running (GENA mode)");
         loop {
@@ -84,6 +93,9 @@ impl Bridge {
 
                 _ = zone_timer.tick() =>
                     self.poll_zone_groups().await,
+
+                _ = content_timer.tick() =>
+                    self.poll_content_catalogs().await,
             }
         }
     }
@@ -93,7 +105,10 @@ impl Bridge {
     async fn handle_discovered(&mut self, speaker: Speaker) {
         let uuid: String = match speaker.uuid().await {
             Ok(u) => u,
-            Err(e) => { warn!(error = %e, "Could not get UUID; skipping"); return; }
+            Err(e) => {
+                warn!(error = %e, "Could not get UUID; skipping");
+                return;
+            }
         };
 
         // If already known, just refresh the handle (IP may have changed) and
@@ -115,10 +130,16 @@ impl Bridge {
                 }
             };
             if let Some(handles) = old_handles {
-                for h in handles { h.abort(); }
+                for h in handles {
+                    h.abort();
+                }
             }
             let host_port = speaker_host_port(&speaker);
-            let handles = subscription::subscribe_speaker(host_port, uuid.clone(), self.callback_base.clone());
+            let handles = subscription::subscribe_speaker(
+                host_port,
+                uuid.clone(),
+                self.callback_base.clone(),
+            );
             let mut st = self.state.write().await;
             if let Some(entry) = st.speakers.get_mut(&uuid) {
                 entry.sub_handles = Some(handles);
@@ -128,27 +149,39 @@ impl Bridge {
 
         let room_name: String = match speaker.name().await {
             Ok(n) => n,
-            Err(e) => { warn!(uuid, error = %e, "Could not get room name; skipping"); return; }
+            Err(e) => {
+                warn!(uuid, error = %e, "Could not get room name; skipping");
+                return;
+            }
         };
 
         let (hc_id, display_name, area): (String, String, Option<String>) =
             if let Some(cfg) = self.config_map.get(&uuid) {
                 (cfg.hc_id.clone(), cfg.name.clone(), cfg.area.clone())
             } else {
-                let sanitized: String = room_name.to_lowercase()
-                    .chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
+                let sanitized: String = room_name
+                    .to_lowercase()
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                    .collect();
                 (format!("sonos_{sanitized}"), room_name.clone(), None)
             };
 
         info!(uuid, hc_id, room_name, "Registering new Sonos speaker");
 
-        if let Err(e) = self.publisher
-            .register_device(&hc_id, &display_name, "media_player", area.as_deref()).await
-        { warn!(hc_id, error = %e, "Failed to register device"); }
-        if let Err(e) = self.publisher.subscribe_commands(&hc_id).await
-        { warn!(hc_id, error = %e, "Failed to subscribe to commands"); }
-        if let Err(e) = self.publisher.publish_availability(&hc_id, true).await
-        { warn!(hc_id, error = %e, "Failed to publish availability"); }
+        if let Err(e) = self
+            .publisher
+            .register_device(&hc_id, &display_name, "media_player", area.as_deref())
+            .await
+        {
+            warn!(hc_id, error = %e, "Failed to register device");
+        }
+        if let Err(e) = self.publisher.subscribe_commands(&hc_id).await {
+            warn!(hc_id, error = %e, "Failed to subscribe to commands");
+        }
+        if let Err(e) = self.publisher.publish_availability(&hc_id, true).await {
+            warn!(hc_id, error = %e, "Failed to publish availability");
+        }
 
         // Initial state poll so HomeCore has state before the first GENA event.
         let initial_state = match speaker::poll(&speaker).await {
@@ -164,34 +197,41 @@ impl Bridge {
 
         // Subscribe to GENA events from this speaker.
         let host_port = speaker_host_port(&speaker);
-        let sub_handles = subscription::subscribe_speaker(host_port, uuid.clone(), self.callback_base.clone());
+        let sub_handles =
+            subscription::subscribe_speaker(host_port, uuid.clone(), self.callback_base.clone());
 
         {
             let mut st = self.state.write().await;
             st.uuid_to_room.insert(uuid.clone(), room_name.clone());
-            st.room_to_uuid.insert(room_name.to_lowercase(), uuid.clone());
-            st.speakers.insert(uuid.clone(), SpeakerEntry {
-                speaker:     speaker.clone(),
-                uuid:        uuid.clone(),
-                hc_id:       hc_id.clone(),
-                room_name,
-                available:   true,
-                last_state:  initial_state.clone(),
-                sub_handles: Some(sub_handles),
-            });
+            st.room_to_uuid
+                .insert(room_name.to_lowercase(), uuid.clone());
+            st.speakers.insert(
+                uuid.clone(),
+                SpeakerEntry {
+                    speaker: speaker.clone(),
+                    uuid: uuid.clone(),
+                    hc_id: hc_id.clone(),
+                    room_name,
+                    available: true,
+                    last_state: initial_state.clone(),
+                    sub_handles: Some(sub_handles),
+                },
+            );
         }
         self.hc_to_uuid.insert(hc_id.clone(), uuid.clone());
 
         if let Some(state) = initial_state {
-            let json    = speaker::to_json(&state);
-            let pub2    = self.publisher.clone();
-            let hc_id2  = hc_id.clone();
+            let json = speaker::to_json(&state);
+            let pub2 = self.publisher.clone();
+            let hc_id2 = hc_id.clone();
             tokio::spawn(async move {
                 if let Err(e) = pub2.publish_state(&hc_id2, &json).await {
                     warn!(hc_id = hc_id2, error = %e, "Failed to publish initial state");
                 }
             });
         }
+
+        self.refresh_content_catalog(&uuid).await;
     }
 
     // ── GENA event handling ───────────────────────────────────────────────────
@@ -213,7 +253,7 @@ impl Bridge {
             let mut new_state = entry.last_state.clone().unwrap_or_default();
             match &event {
                 NotifyEvent::Avt(avt) => new_state.apply_avt(avt),
-                NotifyEvent::Rc(rc)   => new_state.apply_rc(rc),
+                NotifyEvent::Rc(rc) => new_state.apply_rc(rc),
             }
 
             let changed = entry.last_state.as_ref() != Some(&new_state);
@@ -245,7 +285,8 @@ impl Bridge {
     async fn heartbeat(&mut self) {
         let handles: Vec<(String, Speaker, bool)> = {
             let st = self.state.read().await;
-            st.speakers.values()
+            st.speakers
+                .values()
                 .map(|e| (e.uuid.clone(), e.speaker.clone(), e.available))
                 .collect()
         };
@@ -283,17 +324,21 @@ impl Bridge {
                     if let Some(hc_id) = hc_id {
                         info!(hc_id, "Speaker recovered — re-subscribing");
                         let pub2 = self.publisher.clone();
-                        let hc2  = hc_id.clone();
+                        let hc2 = hc_id.clone();
                         tokio::spawn(async move {
                             let _ = pub2.publish_availability(&hc2, true).await;
                         });
                         // Abort old subscription loops before spawning new ones.
                         let old_handles = {
                             let mut st = self.state.write().await;
-                            st.speakers.get_mut(&uuid).and_then(|e| e.sub_handles.take())
+                            st.speakers
+                                .get_mut(&uuid)
+                                .and_then(|e| e.sub_handles.take())
                         };
                         if let Some(handles) = old_handles {
-                            for h in handles { h.abort(); }
+                            for h in handles {
+                                h.abort();
+                            }
                         }
                         let host_port = speaker_host_port(&speaker);
                         let sub_handles = subscription::subscribe_speaker(
@@ -319,6 +364,7 @@ impl Bridge {
                                 let _ = pub2.publish_state(&hc_id, &json).await;
                             });
                         }
+                        self.refresh_content_catalog(&uuid).await;
                     }
                 }
                 _ => {}
@@ -331,18 +377,24 @@ impl Bridge {
     async fn poll_zone_groups(&mut self) {
         let handles: Vec<(String, Speaker)> = {
             let st = self.state.read().await;
-            if st.speakers.is_empty() { return; }
-            st.speakers.values().map(|e| (e.uuid.clone(), e.speaker.clone())).collect()
+            if st.speakers.is_empty() {
+                return;
+            }
+            st.speakers
+                .values()
+                .map(|e| (e.uuid.clone(), e.speaker.clone()))
+                .collect()
         };
 
         let zone_groups = self.fetch_zone_groups(&handles).await;
-        if zone_groups.is_empty() { return; }
+        if zone_groups.is_empty() {
+            return;
+        }
 
         // uuid → (coord_uuid, member_uuids)
         let mut group_by_uuid: HashMap<String, (String, Vec<String>)> = HashMap::new();
         for (coord_uuid, members) in &zone_groups {
-            let member_uuids: Vec<String> =
-                members.iter().map(|m| m.uuid().to_string()).collect();
+            let member_uuids: Vec<String> = members.iter().map(|m| m.uuid().to_string()).collect();
             for member in members {
                 group_by_uuid.insert(
                     member.uuid().to_string(),
@@ -354,22 +406,27 @@ impl Bridge {
         // Snapshot uuid → hc_id mapping before taking write lock.
         let uuid_to_hc: HashMap<String, String> = {
             let st = self.state.read().await;
-            st.speakers.iter().map(|(u, e)| (u.clone(), e.hc_id.clone())).collect()
+            st.speakers
+                .iter()
+                .map(|(u, e)| (u.clone(), e.hc_id.clone()))
+                .collect()
         };
 
         let mut to_publish: Vec<(String, serde_json::Value)> = Vec::new();
         {
             let mut st = self.state.write().await;
             for (uuid, (coord_uuid, member_uuids)) in &group_by_uuid {
-                let coord_hc  = uuid_to_hc.get(coord_uuid).cloned();
-                let member_hc: Vec<String> = member_uuids.iter()
-                    .filter_map(|u| uuid_to_hc.get(u).cloned()).collect();
+                let coord_hc = uuid_to_hc.get(coord_uuid).cloned();
+                let member_hc: Vec<String> = member_uuids
+                    .iter()
+                    .filter_map(|u| uuid_to_hc.get(u).cloned())
+                    .collect();
 
                 if let Some(entry) = st.speakers.get_mut(uuid) {
                     let state = entry.last_state.get_or_insert_with(SpeakerState::default);
                     if state.group_coordinator != coord_hc || state.group_members != member_hc {
                         state.group_coordinator = coord_hc;
-                        state.group_members     = member_hc;
+                        state.group_members = member_hc;
                         to_publish.push((entry.hc_id.clone(), speaker::to_json(state)));
                     }
                 }
@@ -381,6 +438,75 @@ impl Bridge {
             tokio::spawn(async move {
                 if let Err(e) = pub2.publish_state(&hc_id, &json).await {
                     warn!(hc_id, error = %e, "Failed to publish zone topology");
+                }
+            });
+        }
+    }
+
+    async fn poll_content_catalogs(&mut self) {
+        let uuids: Vec<String> = {
+            let st = self.state.read().await;
+            st.speakers
+                .iter()
+                .filter_map(|(uuid, entry)| entry.available.then_some(uuid.clone()))
+                .collect()
+        };
+
+        for uuid in uuids {
+            self.refresh_content_catalog(&uuid).await;
+        }
+    }
+
+    async fn refresh_content_catalog(&mut self, uuid: &str) {
+        let (speaker, hc_id, available) = {
+            let st = self.state.read().await;
+            let Some(entry) = st.speakers.get(uuid) else {
+                return;
+            };
+            (entry.speaker.clone(), entry.hc_id.clone(), entry.available)
+        };
+
+        if !available {
+            return;
+        }
+
+        let favorites = match content::favorite_titles(&speaker).await {
+            Ok(items) => items,
+            Err(e) => {
+                warn!(hc_id, error = %e, "Failed to fetch Sonos favorites");
+                return;
+            }
+        };
+
+        let playlists = match content::playlist_titles(&speaker).await {
+            Ok(items) => items,
+            Err(e) => {
+                warn!(hc_id, error = %e, "Failed to fetch Sonos playlists");
+                return;
+            }
+        };
+
+        let state_to_publish = {
+            let mut st = self.state.write().await;
+            let Some(entry) = st.speakers.get_mut(uuid) else {
+                return;
+            };
+            let state = entry.last_state.get_or_insert_with(SpeakerState::default);
+
+            if state.available_favorites == favorites && state.available_playlists == playlists {
+                None
+            } else {
+                state.available_favorites = favorites;
+                state.available_playlists = playlists;
+                Some(speaker::to_json(state))
+            }
+        };
+
+        if let Some(json) = state_to_publish {
+            let pub2 = self.publisher.clone();
+            tokio::spawn(async move {
+                if let Err(e) = pub2.publish_state(&hc_id, &json).await {
+                    warn!(hc_id, error = %e, "Failed to publish Sonos content catalog");
                 }
             });
         }
@@ -410,14 +536,27 @@ impl Bridge {
     async fn handle_command(&mut self, hc_id: String, cmd: Value) {
         let uuid = match self.hc_to_uuid.get(&hc_id) {
             Some(u) => u.clone(),
-            None => { warn!(hc_id, "Received command for unknown device"); return; }
+            None => {
+                warn!(hc_id, "Received command for unknown device");
+                return;
+            }
         };
         let (speaker, available, uuid_to_room) = {
             let st = self.state.read().await;
-            let entry = match st.speakers.get(&uuid) { Some(e) => e, None => return };
-            (entry.speaker.clone(), entry.available, st.uuid_to_room.clone())
+            let entry = match st.speakers.get(&uuid) {
+                Some(e) => e,
+                None => return,
+            };
+            (
+                entry.speaker.clone(),
+                entry.available,
+                st.uuid_to_room.clone(),
+            )
         };
-        if !available { warn!(hc_id, "Ignoring command — speaker is offline"); return; }
+        if !available {
+            warn!(hc_id, "Ignoring command — speaker is offline");
+            return;
+        }
         if let Err(e) = speaker::execute_command(&speaker, &cmd, &uuid_to_room).await {
             warn!(hc_id, error = %e, ?cmd, "Command failed");
         } else {
@@ -430,7 +569,7 @@ impl Bridge {
 
 /// Extract `"host:1400"` from a Speaker's device URL.
 fn speaker_host_port(speaker: &Speaker) -> String {
-    let url  = speaker.device().url();
+    let url = speaker.device().url();
     let host = url.host().unwrap_or("127.0.0.1");
     let port = url.port_u16().unwrap_or(1400);
     format!("{host}:{port}")

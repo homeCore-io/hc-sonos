@@ -116,17 +116,20 @@ pub async fn list_playlists(speaker: &Speaker) -> Result<Vec<Value>> {
 /// sonor's `args!` macro does not escape, so callers must pre-escape.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Get a favorite by 0-based index (matches position in /favorites output).
 /// Returns (xml_escaped_uri, xml_escaped_metadata) ready for sonor's set_transport_uri.
 /// sonor's args! macro does not XML-escape, so both values must be pre-escaped.
-pub async fn get_favorite_by_index(speaker: &Speaker, index: usize) -> Result<Option<(String, String)>> {
+pub async fn get_favorite_by_index(
+    speaker: &Speaker,
+    index: usize,
+) -> Result<Option<(String, String)>> {
     let mut items = list_favorites(speaker).await?;
     Ok(items.get_mut(index).map(|item| {
-        let uri      = xml_escape(item["uri"].as_str().unwrap_or(""));
+        let uri = xml_escape(item["uri"].as_str().unwrap_or(""));
         let metadata = xml_escape(item["metadata"].as_str().unwrap_or(""));
         (uri, metadata)
     }))
@@ -134,11 +137,72 @@ pub async fn get_favorite_by_index(speaker: &Speaker, index: usize) -> Result<Op
 
 /// Get a Sonos playlist by 0-based index (matches position in /playlists output).
 /// Returns (xml_escaped_uri, xml_escaped_metadata) ready for sonor's set_transport_uri.
-pub async fn get_playlist_by_index(speaker: &Speaker, index: usize) -> Result<Option<(String, String)>> {
+pub async fn get_playlist_by_index(
+    speaker: &Speaker,
+    index: usize,
+) -> Result<Option<(String, String)>> {
     let mut items = list_playlists(speaker).await?;
     Ok(items.get_mut(index).map(|item| {
-        let uri      = xml_escape(item["uri"].as_str().unwrap_or(""));
+        let uri = xml_escape(item["uri"].as_str().unwrap_or(""));
         let metadata = xml_escape(item["metadata"].as_str().unwrap_or(""));
         (uri, metadata)
     }))
+}
+
+pub async fn favorite_titles(speaker: &Speaker) -> Result<Vec<String>> {
+    Ok(list_favorites(speaker)
+        .await?
+        .into_iter()
+        .filter_map(|item| item["title"].as_str().map(str::to_string))
+        .collect())
+}
+
+pub async fn playlist_titles(speaker: &Speaker) -> Result<Vec<String>> {
+    Ok(list_playlists(speaker)
+        .await?
+        .into_iter()
+        .filter_map(|item| item["title"].as_str().map(str::to_string))
+        .collect())
+}
+
+pub async fn get_favorite_by_name(
+    speaker: &Speaker,
+    name: &str,
+) -> Result<Option<(String, String)>> {
+    let needle = name.trim().to_lowercase();
+    let mut items = list_favorites(speaker).await?;
+    Ok(items
+        .iter_mut()
+        .find(|item| {
+            item["title"]
+                .as_str()
+                .map(|title| title.trim().to_lowercase() == needle)
+                .unwrap_or(false)
+        })
+        .map(|item| {
+            let uri = xml_escape(item["uri"].as_str().unwrap_or(""));
+            let metadata = xml_escape(item["metadata"].as_str().unwrap_or(""));
+            (uri, metadata)
+        }))
+}
+
+pub async fn get_playlist_by_name(
+    speaker: &Speaker,
+    name: &str,
+) -> Result<Option<(String, String)>> {
+    let needle = name.trim().to_lowercase();
+    let mut items = list_playlists(speaker).await?;
+    Ok(items
+        .iter_mut()
+        .find(|item| {
+            item["title"]
+                .as_str()
+                .map(|title| title.trim().to_lowercase() == needle)
+                .unwrap_or(false)
+        })
+        .map(|item| {
+            let uri = xml_escape(item["uri"].as_str().unwrap_or(""));
+            let metadata = xml_escape(item["metadata"].as_str().unwrap_or(""));
+            (uri, metadata)
+        }))
 }

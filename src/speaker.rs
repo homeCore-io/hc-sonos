@@ -5,13 +5,14 @@ use serde_json::{json, Value};
 use sonor::{RepeatMode, Speaker};
 use tracing::warn;
 
+use crate::api::content;
 use crate::events::{AvtState, RcState};
 
 fn repeat_to_str(r: RepeatMode) -> &'static str {
     match r {
         RepeatMode::None => "none",
-        RepeatMode::One  => "one",
-        RepeatMode::All  => "all",
+        RepeatMode::One => "one",
+        RepeatMode::All => "all",
     }
 }
 
@@ -19,7 +20,7 @@ fn str_to_repeat(s: &str) -> RepeatMode {
     match s {
         "one" => RepeatMode::One,
         "all" => RepeatMode::All,
-        _     => RepeatMode::None,
+        _ => RepeatMode::None,
     }
 }
 
@@ -32,42 +33,46 @@ fn str_to_repeat(s: &str) -> RepeatMode {
 /// depending on `RepeatMode`'s trait implementations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeakerState {
-    pub playing:   bool,
-    pub volume:    u16,
-    pub muted:     bool,
-    pub shuffle:   bool,
-    pub repeat:    String,
-    pub title:     Option<String>,
-    pub artist:    Option<String>,
-    pub album:     Option<String>,
-    pub duration:  Option<u32>,
-    pub position:  Option<u32>,
-    pub bass:      i8,
-    pub treble:    i8,
-    pub loudness:  bool,
+    pub playing: bool,
+    pub volume: u16,
+    pub muted: bool,
+    pub shuffle: bool,
+    pub repeat: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<u32>,
+    pub position: Option<u32>,
+    pub bass: i8,
+    pub treble: i8,
+    pub loudness: bool,
     /// Populated by bridge after zone_group_state() query.
     pub group_coordinator: Option<String>,
-    pub group_members:     Vec<String>,
+    pub group_members: Vec<String>,
+    pub available_favorites: Vec<String>,
+    pub available_playlists: Vec<String>,
 }
 
 impl Default for SpeakerState {
     fn default() -> Self {
         Self {
-            playing:           false,
-            volume:            0,
-            muted:             false,
-            shuffle:           false,
-            repeat:            "none".to_string(),
-            title:             None,
-            artist:            None,
-            album:             None,
-            duration:          None,
-            position:          None,
-            bass:              0,
-            treble:            0,
-            loudness:          false,
+            playing: false,
+            volume: 0,
+            muted: false,
+            shuffle: false,
+            repeat: "none".to_string(),
+            title: None,
+            artist: None,
+            album: None,
+            duration: None,
+            position: None,
+            bass: 0,
+            treble: 0,
+            loudness: false,
             group_coordinator: None,
-            group_members:     vec![],
+            group_members: vec![],
+            available_favorites: vec![],
+            available_playlists: vec![],
         }
     }
 }
@@ -75,53 +80,72 @@ impl Default for SpeakerState {
 impl SpeakerState {
     /// Apply a partial AVTransport update in-place.
     pub fn apply_avt(&mut self, avt: &AvtState) {
-        if let Some(v) = avt.playing  { self.playing = v; }
-        if let Some(v) = avt.shuffle  { self.shuffle = v; }
-        if let Some(ref v) = avt.repeat { self.repeat = v.clone(); }
-        if let Some(v) = avt.duration { self.duration = Some(v); }
-        if let Some(v) = avt.position { self.position = Some(v); }
+        if let Some(v) = avt.playing {
+            self.playing = v;
+        }
+        if let Some(v) = avt.shuffle {
+            self.shuffle = v;
+        }
+        if let Some(ref v) = avt.repeat {
+            self.repeat = v.clone();
+        }
+        if let Some(v) = avt.duration {
+            self.duration = Some(v);
+        }
+        if let Some(v) = avt.position {
+            self.position = Some(v);
+        }
         if avt.track_info_present {
-            self.title  = avt.title.clone();
+            self.title = avt.title.clone();
             self.artist = avt.artist.clone();
-            self.album  = avt.album.clone();
+            self.album = avt.album.clone();
         }
     }
 
     /// Apply a partial RenderingControl update in-place.
     pub fn apply_rc(&mut self, rc: &RcState) {
-        if let Some(v) = rc.volume   { self.volume   = v; }
-        if let Some(v) = rc.muted    { self.muted    = v; }
-        if let Some(v) = rc.bass     { self.bass     = v; }
-        if let Some(v) = rc.treble   { self.treble   = v; }
-        if let Some(v) = rc.loudness { self.loudness = v; }
+        if let Some(v) = rc.volume {
+            self.volume = v;
+        }
+        if let Some(v) = rc.muted {
+            self.muted = v;
+        }
+        if let Some(v) = rc.bass {
+            self.bass = v;
+        }
+        if let Some(v) = rc.treble {
+            self.treble = v;
+        }
+        if let Some(v) = rc.loudness {
+            self.loudness = v;
+        }
     }
 }
 
 /// Poll all state from a speaker in one pass.
 pub async fn poll(speaker: &Speaker) -> Result<SpeakerState> {
-    let playing  = speaker.is_playing().await?;
-    let volume   = speaker.volume().await?;
-    let muted    = speaker.mute().await?;
-    let shuffle  = speaker.shuffle().await?;
-    let repeat   = repeat_to_str(speaker.repeat_mode().await?).to_string();
-    let bass     = speaker.bass().await?;
-    let treble   = speaker.treble().await?;
+    let playing = speaker.is_playing().await?;
+    let volume = speaker.volume().await?;
+    let muted = speaker.mute().await?;
+    let shuffle = speaker.shuffle().await?;
+    let repeat = repeat_to_str(speaker.repeat_mode().await?).to_string();
+    let bass = speaker.bass().await?;
+    let treble = speaker.treble().await?;
     let loudness = speaker.loudness().await?;
 
-    let (title, artist, album, duration, position) =
-        match speaker.track().await? {
-            Some(info) => {
-                let t = info.track();
-                (
-                    Some(t.title().to_string()),
-                    t.creator().map(str::to_string),
-                    t.album().map(str::to_string),
-                    Some(info.duration()),
-                    Some(info.elapsed()),
-                )
-            }
-            None => (None, None, None, None, None),
-        };
+    let (title, artist, album, duration, position) = match speaker.track().await? {
+        Some(info) => {
+            let t = info.track();
+            (
+                Some(t.title().to_string()),
+                t.creator().map(str::to_string),
+                t.album().map(str::to_string),
+                Some(info.duration()),
+                Some(info.elapsed()),
+            )
+        }
+        None => (None, None, None, None, None),
+    };
 
     Ok(SpeakerState {
         playing,
@@ -139,6 +163,8 @@ pub async fn poll(speaker: &Speaker) -> Result<SpeakerState> {
         loudness,
         group_coordinator: None,
         group_members: vec![],
+        available_favorites: vec![],
+        available_playlists: vec![],
     })
 }
 
@@ -157,13 +183,25 @@ pub fn to_json(state: &SpeakerState) -> Value {
         "loudness": state.loudness,
         "group_coordinator": state.group_coordinator,
         "group_members":     state.group_members,
+        "available_favorites": state.available_favorites,
+        "available_playlists": state.available_playlists,
     });
 
-    if let Some(v) = &state.title    { obj["media_title"]    = json!(v); }
-    if let Some(v) = &state.artist   { obj["media_artist"]   = json!(v); }
-    if let Some(v) = &state.album    { obj["media_album"]    = json!(v); }
-    if let Some(v) = state.duration  { obj["media_duration"] = json!(v); }
-    if let Some(v) = state.position  { obj["media_position"] = json!(v); }
+    if let Some(v) = &state.title {
+        obj["media_title"] = json!(v);
+    }
+    if let Some(v) = &state.artist {
+        obj["media_artist"] = json!(v);
+    }
+    if let Some(v) = &state.album {
+        obj["media_album"] = json!(v);
+    }
+    if let Some(v) = state.duration {
+        obj["media_duration"] = json!(v);
+    }
+    if let Some(v) = state.position {
+        obj["media_position"] = json!(v);
+    }
 
     obj
 }
@@ -177,39 +215,50 @@ pub fn to_json(state: &SpeakerState) -> Value {
 /// `uuid_to_room` maps speaker UUID → room name and is required for the
 /// `join` command (sonor's `join()` takes a room name, not a UUID).
 pub async fn execute_command(
-    speaker:       &Speaker,
-    cmd:           &Value,
-    uuid_to_room:  &std::collections::HashMap<String, String>,
+    speaker: &Speaker,
+    cmd: &Value,
+    uuid_to_room: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
     let action = cmd["action"].as_str().unwrap_or("");
 
     match action {
-        "play"     => speaker.play().await?,
-        "pause"    => speaker.pause().await?,
-        "stop"     => speaker.stop().await?,
-        "next"     => speaker.next().await?,
+        "play" => speaker.play().await?,
+        "pause" => speaker.pause().await?,
+        "stop" => speaker.stop().await?,
+        "toggle_play_pause" => {
+            if speaker.is_playing().await? {
+                speaker.pause().await?;
+            } else {
+                speaker.play().await?;
+            }
+        }
+        "next" => speaker.next().await?,
         "previous" => speaker.previous().await?,
 
         "set_volume" => {
-            let vol = cmd["volume"].as_u64()
+            let vol = cmd["volume"]
+                .as_u64()
                 .ok_or_else(|| anyhow::anyhow!("set_volume requires integer 'volume'"))?;
             speaker.set_volume(vol as u16).await?;
         }
 
-        "mute" => {
-            let muted = cmd["muted"].as_bool()
-                .ok_or_else(|| anyhow::anyhow!("mute requires boolean 'muted'"))?;
+        "mute" | "set_mute" => {
+            let muted = cmd["muted"]
+                .as_bool()
+                .ok_or_else(|| anyhow::anyhow!("set_mute requires boolean 'muted'"))?;
             speaker.set_mute(muted).await?;
         }
 
         "seek" => {
-            let secs = cmd["position"].as_u64()
+            let secs = cmd["position"]
+                .as_u64()
                 .ok_or_else(|| anyhow::anyhow!("seek requires integer 'position'"))?;
             speaker.skip_to(secs as u32).await?;
         }
 
         "set_shuffle" => {
-            let shuffle = cmd["shuffle"].as_bool()
+            let shuffle = cmd["shuffle"]
+                .as_bool()
                 .ok_or_else(|| anyhow::anyhow!("set_shuffle requires boolean 'shuffle'"))?;
             speaker.set_shuffle(shuffle).await?;
         }
@@ -220,35 +269,112 @@ pub async fn execute_command(
         }
 
         "set_bass" => {
-            let bass = cmd["bass"].as_i64()
+            let bass = cmd["bass"]
+                .as_i64()
                 .ok_or_else(|| anyhow::anyhow!("set_bass requires integer 'bass'"))?;
             speaker.set_bass(bass as i8).await?;
         }
 
         "set_treble" => {
-            let treble = cmd["treble"].as_i64()
+            let treble = cmd["treble"]
+                .as_i64()
                 .ok_or_else(|| anyhow::anyhow!("set_treble requires integer 'treble'"))?;
             speaker.set_treble(treble as i8).await?;
         }
 
         "set_loudness" => {
-            let loudness = cmd["loudness"].as_bool()
+            let loudness = cmd["loudness"]
+                .as_bool()
                 .ok_or_else(|| anyhow::anyhow!("set_loudness requires boolean 'loudness'"))?;
             speaker.set_loudness(loudness).await?;
         }
 
         "play_uri" => {
-            let uri = cmd["uri"].as_str()
+            let uri = cmd["uri"]
+                .as_str()
                 .ok_or_else(|| anyhow::anyhow!("play_uri requires string 'uri'"))?;
             let metadata = cmd["metadata"].as_str().unwrap_or("");
             speaker.set_transport_uri(uri, metadata).await?;
             speaker.play().await?;
         }
 
+        "play_favorite" => {
+            let target = cmd["favorite"]
+                .as_str()
+                .or_else(|| cmd["name"].as_str())
+                .ok_or_else(|| anyhow::anyhow!("play_favorite requires string 'favorite'"))?;
+            let Some((uri, metadata)) = content::get_favorite_by_name(speaker, target).await?
+            else {
+                bail!("unknown Sonos favorite: {target}");
+            };
+            speaker.set_transport_uri(&uri, &metadata).await?;
+            speaker.play().await?;
+        }
+
+        "play_playlist" => {
+            let target = cmd["playlist"]
+                .as_str()
+                .or_else(|| cmd["name"].as_str())
+                .ok_or_else(|| anyhow::anyhow!("play_playlist requires string 'playlist'"))?;
+            let Some((uri, metadata)) = content::get_playlist_by_name(speaker, target).await?
+            else {
+                bail!("unknown Sonos playlist: {target}");
+            };
+            speaker.set_transport_uri(&uri, &metadata).await?;
+            speaker.play().await?;
+        }
+
+        "play_media" => {
+            let media_type = cmd["media_type"].as_str().unwrap_or("");
+            match media_type {
+                "favorite" => {
+                    let target = cmd["name"]
+                        .as_str()
+                        .or_else(|| cmd["favorite"].as_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("play_media favorite requires string 'name'")
+                        })?;
+                    let Some((uri, metadata)) =
+                        content::get_favorite_by_name(speaker, target).await?
+                    else {
+                        bail!("unknown Sonos favorite: {target}");
+                    };
+                    speaker.set_transport_uri(&uri, &metadata).await?;
+                    speaker.play().await?;
+                }
+                "playlist" => {
+                    let target = cmd["name"]
+                        .as_str()
+                        .or_else(|| cmd["playlist"].as_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("play_media playlist requires string 'name'")
+                        })?;
+                    let Some((uri, metadata)) =
+                        content::get_playlist_by_name(speaker, target).await?
+                    else {
+                        bail!("unknown Sonos playlist: {target}");
+                    };
+                    speaker.set_transport_uri(&uri, &metadata).await?;
+                    speaker.play().await?;
+                }
+                "uri" => {
+                    let uri = cmd["uri"]
+                        .as_str()
+                        .ok_or_else(|| anyhow::anyhow!("play_media uri requires string 'uri'"))?;
+                    let metadata = cmd["metadata"].as_str().unwrap_or("");
+                    speaker.set_transport_uri(uri, metadata).await?;
+                    speaker.play().await?;
+                }
+                other => bail!("unsupported play_media type: {other}"),
+            }
+        }
+
         "join" => {
-            let coordinator_uuid = cmd["coordinator"].as_str()
+            let coordinator_uuid = cmd["coordinator"]
+                .as_str()
                 .ok_or_else(|| anyhow::anyhow!("join requires string 'coordinator' (UUID)"))?;
-            let room_name = uuid_to_room.get(coordinator_uuid)
+            let room_name = uuid_to_room
+                .get(coordinator_uuid)
                 .ok_or_else(|| anyhow::anyhow!("unknown coordinator UUID: {coordinator_uuid}"))?;
             let joined = speaker.join(room_name).await?;
             if !joined {
