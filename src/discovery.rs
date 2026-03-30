@@ -17,9 +17,9 @@ use tracing::{debug, info, warn};
 /// (duplicates across cycles are fine — the bridge deduplicates by UUID).
 pub fn spawn(
     discovery_interval: Duration,
-    discovery_timeout:  Duration,
-    manual_hosts:       Vec<String>,
-    tx:                 mpsc::Sender<sonor::Speaker>,
+    discovery_timeout: Duration,
+    manual_hosts: Vec<String>,
+    tx: mpsc::Sender<sonor::Speaker>,
 ) {
     tokio::spawn(async move {
         loop {
@@ -29,11 +29,7 @@ pub fn spawn(
     });
 }
 
-async fn run_once(
-    timeout:       &Duration,
-    manual_hosts:  &[String],
-    tx:            &mpsc::Sender<sonor::Speaker>,
-) {
+async fn run_once(timeout: &Duration, manual_hosts: &[String], tx: &mpsc::Sender<sonor::Speaker>) {
     // ── SSDP ─────────────────────────────────────────────────────────────────
     match sonor::discover(*timeout).await {
         Ok(stream) => {
@@ -70,7 +66,7 @@ async fn run_once(
                 }
             }
             Ok(None) => debug!(host, "Manual host returned no Sonos device"),
-            Err(e)   => warn!(host, error = %e, "Manual host probe failed"),
+            Err(e) => warn!(host, error = %e, "Manual host probe failed"),
         }
     }
 }

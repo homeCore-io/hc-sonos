@@ -18,12 +18,12 @@ use crate::speaker::SpeakerState;
 // ---------------------------------------------------------------------------
 
 pub struct SpeakerEntry {
-    pub speaker:     Speaker,
-    pub uuid:        String,
-    pub hc_id:       String,
-    pub room_name:   String,
-    pub available:   bool,
-    pub last_state:  Option<SpeakerState>,
+    pub speaker: Speaker,
+    pub uuid: String,
+    pub hc_id: String,
+    pub room_name: String,
+    pub available: bool,
+    pub last_state: Option<SpeakerState>,
     /// Abort handles for the two GENA subscription loops (AVTransport, RenderingControl).
     /// Stored so old loops can be cancelled before spawning new ones on re-subscribe.
     pub sub_handles: Option<[AbortHandle; 2]>,
@@ -36,7 +36,7 @@ pub struct SpeakerEntry {
 #[derive(Default)]
 pub struct SharedState {
     /// uuid → entry
-    pub speakers:     HashMap<String, SpeakerEntry>,
+    pub speakers: HashMap<String, SpeakerEntry>,
     /// lowercase room name → uuid  (HTTP routing)
     pub room_to_uuid: HashMap<String, String>,
     /// uuid → original room name
@@ -50,8 +50,6 @@ impl SharedState {
         let uuid = self.room_to_uuid.get(&lower)?;
         self.speakers.get(uuid)
     }
-
-
 }
 
 pub type AppState = Arc<RwLock<SharedState>>;

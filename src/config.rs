@@ -17,8 +17,8 @@ pub struct SonosConfig {
 
 impl SonosConfig {
     pub fn load(path: &str) -> Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading config from {path}"))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading config from {path}"))?;
         toml::from_str(&text).context("parsing config TOML")
     }
 }
@@ -63,8 +63,8 @@ impl Default for SonosSection {
     fn default() -> Self {
         Self {
             discovery_interval_secs: default_discovery_interval_secs(),
-            discovery_timeout_secs:  default_discovery_timeout_secs(),
-            manual_hosts:            vec![],
+            discovery_timeout_secs: default_discovery_timeout_secs(),
+            manual_hosts: vec![],
         }
     }
 }
@@ -106,9 +106,9 @@ pub struct ApiConfig {
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            host:          default_api_host(),
-            port:          default_api_port(),
-            enabled:       default_api_enabled(),
+            host: default_api_host(),
+            port: default_api_port(),
+            enabled: default_api_enabled(),
             callback_host: None,
         }
     }
@@ -116,11 +116,27 @@ impl Default for ApiConfig {
 
 // ── defaults ─────────────────────────────────────────────────────────────────
 
-fn default_api_host()               -> String { "0.0.0.0".into() }
-fn default_api_port()               -> u16    { 5005 }
-fn default_api_enabled()            -> bool   { true }
-fn default_broker_host()            -> String { "127.0.0.1".into() }
-fn default_broker_port()            -> u16    { 1883 }
-fn default_plugin_id()              -> String { "plugin.sonos".into() }
-fn default_discovery_interval_secs() -> u64   { 60 }
-fn default_discovery_timeout_secs() -> u64    { 5 }
+fn default_api_host() -> String {
+    "0.0.0.0".into()
+}
+fn default_api_port() -> u16 {
+    5005
+}
+fn default_api_enabled() -> bool {
+    true
+}
+fn default_broker_host() -> String {
+    "127.0.0.1".into()
+}
+fn default_broker_port() -> u16 {
+    1883
+}
+fn default_plugin_id() -> String {
+    "plugin.sonos".into()
+}
+fn default_discovery_interval_secs() -> u64 {
+    60
+}
+fn default_discovery_timeout_secs() -> u64 {
+    5
+}

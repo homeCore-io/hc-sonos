@@ -14,24 +14,24 @@
 /// event (even if empty), distinguishing "no track" from "field not sent".
 #[derive(Debug, Clone, Default)]
 pub struct AvtState {
-    pub playing:            Option<bool>,
-    pub shuffle:            Option<bool>,
-    pub repeat:             Option<String>,
-    pub title:              Option<String>,
-    pub artist:             Option<String>,
-    pub album:              Option<String>,
-    pub duration:           Option<u32>,  // seconds
-    pub position:           Option<u32>,  // seconds
+    pub playing: Option<bool>,
+    pub shuffle: Option<bool>,
+    pub repeat: Option<String>,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<u32>, // seconds
+    pub position: Option<u32>, // seconds
     pub track_info_present: bool,
 }
 
 /// Partial state update from a RenderingControl NOTIFY event.
 #[derive(Debug, Clone, Default)]
 pub struct RcState {
-    pub volume:   Option<u16>,
-    pub muted:    Option<bool>,
-    pub bass:     Option<i8>,
-    pub treble:   Option<i8>,
+    pub volume: Option<u16>,
+    pub muted: Option<bool>,
+    pub bass: Option<i8>,
+    pub treble: Option<i8>,
     pub loudness: Option<bool>,
 }
 
@@ -47,8 +47,10 @@ pub enum NotifyEvent {
 /// Parse an AVTransport NOTIFY body.
 pub fn parse_avt(body: &str) -> Option<AvtState> {
     let inner = extract_last_change(body)?;
-    let doc   = roxmltree::Document::parse(&inner).ok()?;
-    let inst  = doc.root_element().children()
+    let doc = roxmltree::Document::parse(&inner).ok()?;
+    let inst = doc
+        .root_element()
+        .children()
         .find(|n| n.is_element() && n.tag_name().name() == "InstanceID")?;
 
     let mut st = AvtState::default();
@@ -63,7 +65,7 @@ pub fn parse_avt(body: &str) -> Option<AvtState> {
                 if let Some(v) = child.attribute("val") {
                     let (sh, rep) = decode_play_mode(v);
                     st.shuffle = Some(sh);
-                    st.repeat  = Some(rep.to_string());
+                    st.repeat = Some(rep.to_string());
                 }
             }
             "CurrentTrackDuration" => {
@@ -89,8 +91,10 @@ pub fn parse_avt(body: &str) -> Option<AvtState> {
 /// Parse a RenderingControl NOTIFY body.
 pub fn parse_rc(body: &str) -> Option<RcState> {
     let inner = extract_last_change(body)?;
-    let doc   = roxmltree::Document::parse(&inner).ok()?;
-    let inst  = doc.root_element().children()
+    let doc = roxmltree::Document::parse(&inner).ok()?;
+    let inst = doc
+        .root_element()
+        .children()
         .find(|n| n.is_element() && n.tag_name().name() == "InstanceID")?;
 
     let mut st = RcState::default();
@@ -102,8 +106,12 @@ pub fn parse_rc(body: &str) -> Option<RcState> {
             "Mute" if child.attribute("channel") == Some("Master") => {
                 st.muted = child.attribute("val").map(|v| v == "1");
             }
-            "Bass"   => { st.bass   = child.attribute("val").and_then(|v| v.parse().ok()); }
-            "Treble" => { st.treble = child.attribute("val").and_then(|v| v.parse().ok()); }
+            "Bass" => {
+                st.bass = child.attribute("val").and_then(|v| v.parse().ok());
+            }
+            "Treble" => {
+                st.treble = child.attribute("val").and_then(|v| v.parse().ok());
+            }
             "Loudness" if child.attribute("channel") == Some("Master") => {
                 st.loudness = child.attribute("val").map(|v| v == "1");
             }
@@ -130,16 +138,22 @@ fn extract_last_change(body: &str) -> Option<String> {
 
 /// Parse DIDL-Lite XML (from `CurrentTrackMetaData`) into `AvtState` fields.
 fn extract_didl(st: &mut AvtState, didl: &str) {
-    let Ok(doc) = roxmltree::Document::parse(didl) else { return };
-    let Some(item) = doc.root_element().children()
+    let Ok(doc) = roxmltree::Document::parse(didl) else {
+        return;
+    };
+    let Some(item) = doc
+        .root_element()
+        .children()
         .find(|n| n.is_element() && n.tag_name().name() == "item")
-    else { return };
+    else {
+        return;
+    };
 
     for child in item.children().filter(|n| n.is_element()) {
         match child.tag_name().name() {
-            "title"   => st.title  = child.text().map(str::to_string),
+            "title" => st.title = child.text().map(str::to_string),
             "creator" => st.artist = child.text().map(str::to_string),
-            "album"   => st.album  = child.text().map(str::to_string),
+            "album" => st.album = child.text().map(str::to_string),
             _ => {}
         }
     }
@@ -147,12 +161,12 @@ fn extract_didl(st: &mut AvtState, didl: &str) {
 
 fn decode_play_mode(mode: &str) -> (bool, &'static str) {
     match mode {
-        "SHUFFLE_NOREPEAT"   => (true,  "none"),
-        "SHUFFLE"            => (true,  "all"),
-        "SHUFFLE_REPEAT_ONE" => (true,  "one"),
-        "REPEAT_ALL"         => (false, "all"),
-        "REPEAT_ONE"         => (false, "one"),
-        _                    => (false, "none"),  // NORMAL or unknown
+        "SHUFFLE_NOREPEAT" => (true, "none"),
+        "SHUFFLE" => (true, "all"),
+        "SHUFFLE_REPEAT_ONE" => (true, "one"),
+        "REPEAT_ALL" => (false, "all"),
+        "REPEAT_ONE" => (false, "one"),
+        _ => (false, "none"), // NORMAL or unknown
     }
 }
 

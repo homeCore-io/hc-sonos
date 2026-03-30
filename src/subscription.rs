@@ -12,9 +12,9 @@ use tokio::net::TcpStream;
 use tokio::task::AbortHandle;
 use tracing::{debug, warn};
 
-const LEASE_SECS:  u32 = 300;
+const LEASE_SECS: u32 = 300;
 const RENEW_AFTER: u64 = 240; // renew 60 s before the lease expires
-const RETRY_AFTER: u64 = 30;  // back-off after a failed SUBSCRIBE
+const RETRY_AFTER: u64 = 30; // back-off after a failed SUBSCRIBE
 
 /// Subscribe to both AVTransport and RenderingControl events for a speaker.
 ///
@@ -27,8 +27,8 @@ const RETRY_AFTER: u64 = 30;  // back-off after a failed SUBSCRIBE
 /// from accumulating across re-discoveries and heartbeat recoveries).
 pub fn subscribe_speaker(
     speaker_host_port: String,
-    uuid:              String,
-    callback_base:     String,
+    uuid: String,
+    callback_base: String,
 ) -> [AbortHandle; 2] {
     let avt = spawn_loop(
         speaker_host_port.clone(),
@@ -85,8 +85,8 @@ fn spawn_loop(host_port: String, event_path: &'static str, callback_url: String)
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 async fn send_subscribe(
-    host_port:    &str,
-    event_path:   &str,
+    host_port: &str,
+    event_path: &str,
     callback_url: &str,
     timeout_secs: u32,
 ) -> anyhow::Result<String> {
@@ -103,9 +103,9 @@ async fn send_subscribe(
 }
 
 async fn send_resubscribe(
-    host_port:    &str,
-    event_path:   &str,
-    sid:          &str,
+    host_port: &str,
+    event_path: &str,
+    sid: &str,
     timeout_secs: u32,
 ) -> anyhow::Result<String> {
     let req = format!(
@@ -121,26 +121,27 @@ async fn send_resubscribe(
 
 /// Open a TCP connection, write `request`, read headers, return the SID value.
 async fn raw_http(host_port: &str, request: &str) -> anyhow::Result<String> {
-    let mut stream = tokio::time::timeout(
-        Duration::from_secs(10),
-        TcpStream::connect(host_port),
-    )
-    .await??;
+    let mut stream =
+        tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(host_port)).await??;
 
     stream.write_all(request.as_bytes()).await?;
 
     // Read until end-of-headers marker
-    let mut buf   = Vec::with_capacity(1024);
+    let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 512];
     loop {
         let n = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut chunk)).await??;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         buf.extend_from_slice(&chunk[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") { break; }
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
     }
 
-    let response  = String::from_utf8_lossy(&buf);
-    let first     = response.lines().next().unwrap_or("");
+    let response = String::from_utf8_lossy(&buf);
+    let first = response.lines().next().unwrap_or("");
 
     if !first.contains("200") {
         return Err(anyhow::anyhow!("non-200 response: {first}"));
@@ -151,5 +152,7 @@ async fn raw_http(host_port: &str, request: &str) -> anyhow::Result<String> {
             return Ok(line[4..].trim().to_string());
         }
     }
-    Err(anyhow::anyhow!("SUBSCRIBE response contained no SID header"))
+    Err(anyhow::anyhow!(
+        "SUBSCRIBE response contained no SID header"
+    ))
 }

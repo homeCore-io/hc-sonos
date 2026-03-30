@@ -19,14 +19,14 @@ use crate::config::HomecoreConfig;
 
 #[derive(Clone)]
 pub struct HomecorePublisher {
-    client:    AsyncClient,
+    client: AsyncClient,
     plugin_id: String,
 }
 
 impl HomecorePublisher {
     /// Publish full device state (retained).
     pub async fn publish_state(&self, device_id: &str, state: &Value) -> Result<()> {
-        let topic   = format!("homecore/devices/{device_id}/state");
+        let topic = format!("homecore/devices/{device_id}/state");
         let payload = serde_json::to_vec(state)?;
         self.client
             .publish(&topic, QoS::AtLeastOnce, true, payload)
@@ -36,7 +36,7 @@ impl HomecorePublisher {
 
     /// Publish `"online"` or `"offline"` to the availability topic (retained).
     pub async fn publish_availability(&self, device_id: &str, online: bool) -> Result<()> {
-        let topic   = format!("homecore/devices/{device_id}/availability");
+        let topic = format!("homecore/devices/{device_id}/availability");
         let payload = if online { "online" } else { "offline" };
         self.client
             .publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
@@ -47,10 +47,10 @@ impl HomecorePublisher {
     /// Register a device with HomeCore.
     pub async fn register_device(
         &self,
-        device_id:   &str,
-        name:        &str,
+        device_id: &str,
+        name: &str,
         device_type: &str,
-        area:        Option<&str>,
+        area: Option<&str>,
     ) -> Result<()> {
         let topic = format!("homecore/plugins/{}/register", self.plugin_id);
         let mut payload = serde_json::json!({
@@ -63,7 +63,12 @@ impl HomecorePublisher {
             payload["area"] = Value::String(a.to_string());
         }
         self.client
-            .publish(&topic, QoS::AtLeastOnce, false, serde_json::to_vec(&payload)?)
+            .publish(
+                &topic,
+                QoS::AtLeastOnce,
+                false,
+                serde_json::to_vec(&payload)?,
+            )
             .await
             .context("register_device failed")?;
         debug!(device_id, device_type, "Registered device with HomeCore");
@@ -87,7 +92,7 @@ impl HomecorePublisher {
 // ---------------------------------------------------------------------------
 
 pub struct HomecoreClient {
-    client:    AsyncClient,
+    client: AsyncClient,
     eventloop: rumqttc::EventLoop,
     plugin_id: String,
 }
@@ -102,12 +107,16 @@ impl HomecoreClient {
         }
         let (client, eventloop) = AsyncClient::new(opts, 64);
         info!(host = %cfg.broker_host, port = cfg.broker_port, "HomeCore MQTT client created");
-        Ok(Self { client, eventloop, plugin_id: cfg.plugin_id.clone() })
+        Ok(Self {
+            client,
+            eventloop,
+            plugin_id: cfg.plugin_id.clone(),
+        })
     }
 
     pub fn publisher(&self) -> HomecorePublisher {
         HomecorePublisher {
-            client:    self.client.clone(),
+            client: self.client.clone(),
             plugin_id: self.plugin_id.clone(),
         }
     }

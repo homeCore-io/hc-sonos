@@ -1,10 +1,10 @@
 mod api;
 mod bridge;
 mod config;
-mod logging;
 mod discovery;
 mod events;
 mod homecore;
+mod logging;
 mod shared_state;
 mod speaker;
 mod subscription;
@@ -105,10 +105,10 @@ async fn try_start(cfg: &SonosConfig) -> Result<()> {
 
     // ── Spawn HTTP API server ──────────────────────────────────────────────
     if cfg.api.enabled {
-        let api_state  = app_state.clone();
-        let api_host   = cfg.api.host.clone();
-        let api_port   = cfg.api.port;
-        let api_tx     = event_tx.clone();
+        let api_state = app_state.clone();
+        let api_host = cfg.api.host.clone();
+        let api_port = cfg.api.port;
+        let api_tx = event_tx.clone();
         tokio::spawn(async move {
             if let Err(e) = api::serve(&api_host, api_port, api_state, api_tx).await {
                 error!(error = %e, "HTTP API server failed");
@@ -118,10 +118,10 @@ async fn try_start(cfg: &SonosConfig) -> Result<()> {
 
     info!(
         discovery_interval_secs = cfg.sonos.discovery_interval_secs,
-        manual_hosts            = cfg.sonos.manual_hosts.len(),
-        api_enabled             = cfg.api.enabled,
-        api_port                = cfg.api.port,
-        callback_host           = cfg.api.callback_host.as_deref().unwrap_or("127.0.0.1"),
+        manual_hosts = cfg.sonos.manual_hosts.len(),
+        api_enabled = cfg.api.enabled,
+        api_port = cfg.api.port,
+        callback_host = cfg.api.callback_host.as_deref().unwrap_or("127.0.0.1"),
         "hc-sonos started (GENA mode)"
     );
 
