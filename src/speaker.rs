@@ -8,6 +8,31 @@ use tracing::warn;
 use crate::api::content;
 use crate::events::{AvtState, RcState};
 
+fn supported_actions() -> Vec<&'static str> {
+    vec![
+        "play",
+        "pause",
+        "stop",
+        "next",
+        "previous",
+        "set_volume",
+        "set_mute",
+        "seek",
+        "play_media",
+        "join",
+        "unjoin",
+        "set_shuffle",
+        "set_repeat",
+        "set_bass",
+        "set_treble",
+        "set_loudness",
+    ]
+}
+
+fn ui_enrichments() -> Vec<&'static str> {
+    vec!["favorites", "playlists", "grouping", "audio_eq"]
+}
+
 fn repeat_to_str(r: RepeatMode) -> &'static str {
     match r {
         RepeatMode::None => "none",
@@ -171,11 +196,15 @@ pub async fn poll(speaker: &Speaker) -> Result<SpeakerState> {
 /// Serialise a `SpeakerState` to the HomeCore JSON state schema.
 pub fn to_json(state: &SpeakerState) -> Value {
     let transport = if state.playing { "playing" } else { "paused" };
+    let supported_actions = supported_actions();
+    let ui_enrichments = ui_enrichments();
 
     let mut obj = json!({
         "state":    transport,
         "volume":   state.volume,
         "muted":    state.muted,
+        "supported_actions": supported_actions,
+        "ui_enrichments": ui_enrichments,
         "shuffle":  state.shuffle,
         "repeat":   state.repeat,
         "bass":     state.bass,
@@ -185,21 +214,32 @@ pub fn to_json(state: &SpeakerState) -> Value {
         "group_members":     state.group_members,
         "available_favorites": state.available_favorites,
         "available_playlists": state.available_playlists,
+        "sonos": {
+            "favorites": state.available_favorites,
+            "playlists": state.available_playlists,
+            "group_coordinator": state.group_coordinator,
+            "group_members": state.group_members,
+        },
     });
 
     if let Some(v) = &state.title {
+        obj["title"] = json!(v);
         obj["media_title"] = json!(v);
     }
     if let Some(v) = &state.artist {
+        obj["artist"] = json!(v);
         obj["media_artist"] = json!(v);
     }
     if let Some(v) = &state.album {
+        obj["album"] = json!(v);
         obj["media_album"] = json!(v);
     }
     if let Some(v) = state.duration {
+        obj["duration_secs"] = json!(v);
         obj["media_duration"] = json!(v);
     }
     if let Some(v) = state.position {
+        obj["position_secs"] = json!(v);
         obj["media_position"] = json!(v);
     }
 
@@ -390,4 +430,68 @@ pub async fn execute_command(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{to_json, SpeakerState};
+
+    #[test]
+    fn to_json_publishes_generic_media_contract_and_sonos_enrichments() {
+        let state = SpeakerState {
+            playing: true,
+            volume: 27,
+            muted: false,
+            shuffle: true,
+            repeat: "all".to_string(),
+            title: Some("Track Title".to_string()),
+            artist: Some("Artist Name".to_string()),
+            album: Some("Album Name".to_string()),
+            duration: Some(240),
+            position: Some(45),
+            bass: 3,
+            treble: -1,
+            loudness: true,
+            group_coordinator: Some("media.living_room".to_string()),
+            group_members: vec!["media.living_room".to_string(), "media.kitchen".to_string()],
+            available_favorites: vec!["Jazz".to_string(), "News".to_string()],
+            available_playlists: vec!["Morning".to_string()],
+        };
+
+        let json = to_json(&state);
+
+        assert_eq!(json["state"].as_str(), Some("playing"));
+        assert_eq!(json["title"].as_str(), Some("Track Title"));
+        assert_eq!(json["artist"].as_str(), Some("Artist Name"));
+        assert_eq!(json["album"].as_str(), Some("Album Name"));
+        assert_eq!(json["duration_secs"].as_u64(), Some(240));
+        assert_eq!(json["position_secs"].as_u64(), Some(45));
+
+        assert_eq!(json["media_title"].as_str(), Some("Track Title"));
+        assert_eq!(json["media_duration"].as_u64(), Some(240));
+
+        let supported = json["supported_actions"]
+            .as_array()
+            .expect("supported_actions array");
+        assert!(supported
+            .iter()
+            .any(|item| item.as_str() == Some("play_media")));
+        assert!(supported.iter().any(|item| item.as_str() == Some("seek")));
+
+        let enrichments = json["ui_enrichments"]
+            .as_array()
+            .expect("ui_enrichments array");
+        assert!(enrichments
+            .iter()
+            .any(|item| item.as_str() == Some("favorites")));
+        assert!(enrichments
+            .iter()
+            .any(|item| item.as_str() == Some("grouping")));
+
+        assert_eq!(json["sonos"]["favorites"][0].as_str(), Some("Jazz"));
+        assert_eq!(
+            json["sonos"]["group_coordinator"].as_str(),
+            Some("media.living_room")
+        );
+    }
 }
