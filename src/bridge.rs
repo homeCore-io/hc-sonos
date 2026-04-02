@@ -9,7 +9,7 @@
 //! every 5 minutes because Sonos has no GENA event for it.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use sonor::Speaker;
@@ -35,6 +35,7 @@ pub struct Bridge {
     publisher: HomecorePublisher,
     /// Base URL for GENA callbacks, e.g. `"http://192.168.1.10:5005"`.
     callback_base: String,
+    stale_after: Duration,
 }
 
 impl Bridge {
@@ -50,12 +51,14 @@ impl Bridge {
             .clone()
             .unwrap_or_else(|| "127.0.0.1".to_string());
         let callback_base = format!("http://{}:{}", callback_host, cfg.api.port);
+        let stale_after = Duration::from_secs(cfg.sonos.discovery_interval_secs.max(HEARTBEAT_SECS) * 3);
         Self {
             state,
             hc_to_uuid: HashMap::new(),
             config_map,
             publisher,
             callback_base,
+            stale_after,
         }
     }
 
@@ -123,6 +126,7 @@ impl Bridge {
                 let mut st = self.state.write().await;
                 if let Some(entry) = st.speakers.get_mut(&uuid) {
                     entry.speaker = speaker.clone();
+                    entry.last_discovered_at = Instant::now();
                     debug!(uuid, "Refreshed speaker handle");
                     entry.sub_handles.take()
                 } else {
@@ -213,6 +217,7 @@ impl Bridge {
                     hc_id: hc_id.clone(),
                     room_name,
                     available: true,
+                    last_discovered_at: Instant::now(),
                     last_state: initial_state.clone(),
                     sub_handles: Some(sub_handles),
                 },
@@ -368,6 +373,48 @@ impl Bridge {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        self.retire_stale_speakers().await;
+    }
+
+    async fn retire_stale_speakers(&mut self) {
+        let stale: Vec<String> = {
+            let st = self.state.read().await;
+            st.speakers
+                .values()
+                .filter(|entry| {
+                    !entry.available && entry.last_discovered_at.elapsed() >= self.stale_after
+                })
+                .map(|entry| entry.uuid.clone())
+                .collect()
+        };
+
+        for uuid in stale {
+            let removed = {
+                let mut st = self.state.write().await;
+                let entry = st.speakers.remove(&uuid);
+                if let Some(entry) = entry {
+                    st.room_to_uuid.remove(&entry.room_name.to_lowercase());
+                    st.uuid_to_room.remove(&uuid);
+                    self.hc_to_uuid.remove(&entry.hc_id);
+                    Some((entry.hc_id, entry.sub_handles))
+                } else {
+                    None
+                }
+            };
+
+            if let Some((hc_id, sub_handles)) = removed {
+                if let Some(handles) = sub_handles {
+                    for handle in handles {
+                        handle.abort();
+                    }
+                }
+                info!(hc_id, "Speaker stale after discovery timeout; unregistering");
+                if let Err(e) = self.publisher.unregister_device(&hc_id).await {
+                    warn!(hc_id, error = %e, "Failed to unregister stale speaker");
+                }
             }
         }
     }

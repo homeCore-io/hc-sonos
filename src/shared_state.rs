@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tokio::task::AbortHandle;
 
@@ -23,6 +24,7 @@ pub struct SpeakerEntry {
     pub hc_id: String,
     pub room_name: String,
     pub available: bool,
+    pub last_discovered_at: Instant,
     pub last_state: Option<SpeakerState>,
     /// Abort handles for the two GENA subscription loops (AVTransport, RenderingControl).
     /// Stored so old loops can be cancelled before spawning new ones on re-subscribe.
