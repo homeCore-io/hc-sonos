@@ -149,22 +149,6 @@ pub async fn get_playlist_by_index(
     }))
 }
 
-pub async fn favorite_titles(speaker: &Speaker) -> Result<Vec<String>> {
-    Ok(list_favorites(speaker)
-        .await?
-        .into_iter()
-        .filter_map(|item| item["title"].as_str().map(str::to_string))
-        .collect())
-}
-
-pub async fn playlist_titles(speaker: &Speaker) -> Result<Vec<String>> {
-    Ok(list_playlists(speaker)
-        .await?
-        .into_iter()
-        .filter_map(|item| item["title"].as_str().map(str::to_string))
-        .collect())
-}
-
 pub async fn get_favorite_by_name(
     speaker: &Speaker,
     name: &str,

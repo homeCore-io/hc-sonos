@@ -20,9 +20,18 @@ pub struct AvtState {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub image_url: Option<String>,
     pub duration: Option<u32>, // seconds
     pub position: Option<u32>, // seconds
     pub track_info_present: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TrackMetadata {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub image_url: Option<String>,
 }
 
 /// Partial state update from a RenderingControl NOTIFY event.
@@ -138,25 +147,35 @@ fn extract_last_change(body: &str) -> Option<String> {
 
 /// Parse DIDL-Lite XML (from `CurrentTrackMetaData`) into `AvtState` fields.
 fn extract_didl(st: &mut AvtState, didl: &str) {
+    if let Some(meta) = parse_track_metadata(didl) {
+        st.title = meta.title;
+        st.artist = meta.artist;
+        st.album = meta.album;
+        st.image_url = meta.image_url;
+    }
+}
+
+pub fn parse_track_metadata(didl: &str) -> Option<TrackMetadata> {
     let Ok(doc) = roxmltree::Document::parse(didl) else {
-        return;
+        return None;
     };
-    let Some(item) = doc
+    let node = doc
         .root_element()
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "item")
-    else {
-        return;
-    };
+        .find(|n| n.is_element() && matches!(n.tag_name().name(), "item" | "container"))?;
 
-    for child in item.children().filter(|n| n.is_element()) {
+    let mut meta = TrackMetadata::default();
+    for child in node.children().filter(|n| n.is_element()) {
         match child.tag_name().name() {
-            "title" => st.title = child.text().map(str::to_string),
-            "creator" => st.artist = child.text().map(str::to_string),
-            "album" => st.album = child.text().map(str::to_string),
+            "title" => meta.title = child.text().map(str::to_string),
+            "creator" => meta.artist = child.text().map(str::to_string),
+            "album" => meta.album = child.text().map(str::to_string),
+            "albumArtURI" => meta.image_url = child.text().map(str::to_string),
             _ => {}
         }
     }
+
+    Some(meta)
 }
 
 fn decode_play_mode(mode: &str) -> (bool, &'static str) {

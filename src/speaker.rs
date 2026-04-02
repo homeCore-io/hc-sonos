@@ -2,11 +2,11 @@
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
-use sonor::{RepeatMode, Speaker};
+use sonor::{rupnp::ssdp::URN, RepeatMode, Speaker};
 use tracing::warn;
 
 use crate::api::content;
-use crate::events::{AvtState, RcState};
+use crate::events::{parse_track_metadata, AvtState, RcState};
 
 fn supported_actions() -> Vec<&'static str> {
     vec![
@@ -66,6 +66,7 @@ pub struct SpeakerState {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub media_image_url: Option<String>,
     pub duration: Option<u32>,
     pub position: Option<u32>,
     pub bass: i8,
@@ -76,6 +77,8 @@ pub struct SpeakerState {
     pub group_members: Vec<String>,
     pub available_favorites: Vec<String>,
     pub available_playlists: Vec<String>,
+    pub available_favorite_items: Vec<Value>,
+    pub available_playlist_items: Vec<Value>,
 }
 
 impl Default for SpeakerState {
@@ -89,6 +92,7 @@ impl Default for SpeakerState {
             title: None,
             artist: None,
             album: None,
+            media_image_url: None,
             duration: None,
             position: None,
             bass: 0,
@@ -98,6 +102,8 @@ impl Default for SpeakerState {
             group_members: vec![],
             available_favorites: vec![],
             available_playlists: vec![],
+            available_favorite_items: vec![],
+            available_playlist_items: vec![],
         }
     }
 }
@@ -124,6 +130,7 @@ impl SpeakerState {
             self.title = avt.title.clone();
             self.artist = avt.artist.clone();
             self.album = avt.album.clone();
+            self.media_image_url = avt.image_url.clone();
         }
     }
 
@@ -158,19 +165,8 @@ pub async fn poll(speaker: &Speaker) -> Result<SpeakerState> {
     let treble = speaker.treble().await?;
     let loudness = speaker.loudness().await?;
 
-    let (title, artist, album, duration, position) = match speaker.track().await? {
-        Some(info) => {
-            let t = info.track();
-            (
-                Some(t.title().to_string()),
-                t.creator().map(str::to_string),
-                t.album().map(str::to_string),
-                Some(info.duration()),
-                Some(info.elapsed()),
-            )
-        }
-        None => (None, None, None, None, None),
-    };
+    let (title, artist, album, media_image_url, duration, position) =
+        poll_track_details(speaker).await?;
 
     Ok(SpeakerState {
         playing,
@@ -181,6 +177,7 @@ pub async fn poll(speaker: &Speaker) -> Result<SpeakerState> {
         title,
         artist,
         album,
+        media_image_url,
         duration,
         position,
         bass,
@@ -190,6 +187,8 @@ pub async fn poll(speaker: &Speaker) -> Result<SpeakerState> {
         group_members: vec![],
         available_favorites: vec![],
         available_playlists: vec![],
+        available_favorite_items: vec![],
+        available_playlist_items: vec![],
     })
 }
 
@@ -214,9 +213,13 @@ pub fn to_json(state: &SpeakerState) -> Value {
         "group_members":     state.group_members,
         "available_favorites": state.available_favorites,
         "available_playlists": state.available_playlists,
+        "available_favorite_items": state.available_favorite_items,
+        "available_playlist_items": state.available_playlist_items,
         "sonos": {
             "favorites": state.available_favorites,
             "playlists": state.available_playlists,
+            "favorite_items": state.available_favorite_items,
+            "playlist_items": state.available_playlist_items,
             "group_coordinator": state.group_coordinator,
             "group_members": state.group_members,
         },
@@ -234,6 +237,9 @@ pub fn to_json(state: &SpeakerState) -> Value {
         obj["album"] = json!(v);
         obj["media_album"] = json!(v);
     }
+    if let Some(v) = &state.media_image_url {
+        obj["media_image_url"] = json!(v);
+    }
     if let Some(v) = state.duration {
         obj["duration_secs"] = json!(v);
         obj["media_duration"] = json!(v);
@@ -244,6 +250,92 @@ pub fn to_json(state: &SpeakerState) -> Value {
     }
 
     obj
+}
+
+pub fn absolutize_media_url(speaker: &Speaker, uri: &str) -> String {
+    let uri = uri.trim();
+    if uri.is_empty() || uri.starts_with("http://") || uri.starts_with("https://") {
+        return uri.to_string();
+    }
+
+    let base = speaker.device().url();
+    let scheme = base.scheme_str().unwrap_or("http");
+    let host = base
+        .host()
+        .map(|host| host.to_string())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let authority = match base.port_u16() {
+        Some(port) => format!("{host}:{port}"),
+        None => host,
+    };
+
+    if uri.starts_with("//") {
+        format!("{scheme}:{uri}")
+    } else if uri.starts_with('/') {
+        format!("{scheme}://{authority}{uri}")
+    } else {
+        format!("{scheme}://{authority}/{uri}")
+    }
+}
+
+async fn poll_track_details(
+    speaker: &Speaker,
+) -> Result<(
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<u32>,
+)> {
+    let urn = URN::service("schemas-upnp-org", "AVTransport", 1);
+    let mut map = speaker
+        .action(&urn, "GetPositionInfo", "<InstanceID>0</InstanceID>")
+        .await?;
+
+    let duration = map
+        .remove("TrackDuration")
+        .as_deref()
+        .and_then(parse_position_secs);
+    let position = map
+        .remove("RelTime")
+        .as_deref()
+        .and_then(parse_position_secs);
+
+    let Some(metadata) = map.remove("TrackMetaData") else {
+        return Ok((None, None, None, None, duration, position));
+    };
+    if metadata.is_empty() || metadata.eq_ignore_ascii_case("NOT_IMPLEMENTED") {
+        return Ok((None, None, None, None, duration, position));
+    }
+
+    let meta = parse_track_metadata(&metadata).unwrap_or_default();
+    let image_url = meta
+        .image_url
+        .as_deref()
+        .map(|uri| absolutize_media_url(speaker, uri));
+
+    Ok((
+        meta.title,
+        meta.artist,
+        meta.album,
+        image_url,
+        duration,
+        position,
+    ))
+}
+
+fn parse_position_secs(value: &str) -> Option<u32> {
+    let value = value.trim();
+    if value.is_empty() || value.eq_ignore_ascii_case("NOT_IMPLEMENTED") {
+        return None;
+    }
+
+    let mut parts = value.splitn(3, ':');
+    let hours: u32 = parts.next()?.parse().ok()?;
+    let minutes: u32 = parts.next()?.parse().ok()?;
+    let seconds: u32 = parts.next()?.split('.').next()?.parse().ok()?;
+    Some(hours * 3600 + minutes * 60 + seconds)
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +526,8 @@ pub async fn execute_command(
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::{to_json, SpeakerState};
 
     #[test]
@@ -447,6 +541,7 @@ mod tests {
             title: Some("Track Title".to_string()),
             artist: Some("Artist Name".to_string()),
             album: Some("Album Name".to_string()),
+            media_image_url: Some("http://speaker:1400/img/cover.jpg".to_string()),
             duration: Some(240),
             position: Some(45),
             bass: 3,
@@ -456,6 +551,13 @@ mod tests {
             group_members: vec!["media.living_room".to_string(), "media.kitchen".to_string()],
             available_favorites: vec!["Jazz".to_string(), "News".to_string()],
             available_playlists: vec!["Morning".to_string()],
+            available_favorite_items: vec![
+                json!({"title": "Jazz", "albumArtUri": "http://speaker:1400/img/jazz.jpg"}),
+                json!({"title": "News"}),
+            ],
+            available_playlist_items: vec![
+                json!({"title": "Morning", "albumArtUri": "http://speaker:1400/img/morning.jpg"}),
+            ],
         };
 
         let json = to_json(&state);
@@ -464,6 +566,10 @@ mod tests {
         assert_eq!(json["title"].as_str(), Some("Track Title"));
         assert_eq!(json["artist"].as_str(), Some("Artist Name"));
         assert_eq!(json["album"].as_str(), Some("Album Name"));
+        assert_eq!(
+            json["media_image_url"].as_str(),
+            Some("http://speaker:1400/img/cover.jpg")
+        );
         assert_eq!(json["duration_secs"].as_u64(), Some(240));
         assert_eq!(json["position_secs"].as_u64(), Some(45));
 
@@ -489,6 +595,14 @@ mod tests {
             .any(|item| item.as_str() == Some("grouping")));
 
         assert_eq!(json["sonos"]["favorites"][0].as_str(), Some("Jazz"));
+        assert_eq!(
+            json["available_favorite_items"][0]["albumArtUri"].as_str(),
+            Some("http://speaker:1400/img/jazz.jpg")
+        );
+        assert_eq!(
+            json["sonos"]["playlist_items"][0]["title"].as_str(),
+            Some("Morning")
+        );
         assert_eq!(
             json["sonos"]["group_coordinator"].as_str(),
             Some("media.living_room")

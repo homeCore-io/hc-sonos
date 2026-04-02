@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use sonor::Speaker;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -51,7 +51,8 @@ impl Bridge {
             .clone()
             .unwrap_or_else(|| "127.0.0.1".to_string());
         let callback_base = format!("http://{}:{}", callback_host, cfg.api.port);
-        let stale_after = Duration::from_secs(cfg.sonos.discovery_interval_secs.max(HEARTBEAT_SECS) * 3);
+        let stale_after =
+            Duration::from_secs(cfg.sonos.discovery_interval_secs.max(HEARTBEAT_SECS) * 3);
         Self {
             state,
             hc_to_uuid: HashMap::new(),
@@ -260,6 +261,10 @@ impl Bridge {
                 NotifyEvent::Avt(avt) => new_state.apply_avt(avt),
                 NotifyEvent::Rc(rc) => new_state.apply_rc(rc),
             }
+            if let Some(image_url) = new_state.media_image_url.clone() {
+                new_state.media_image_url =
+                    Some(speaker::absolutize_media_url(&entry.speaker, &image_url));
+            }
 
             let changed = entry.last_state.as_ref() != Some(&new_state);
             if changed {
@@ -411,7 +416,10 @@ impl Bridge {
                         handle.abort();
                     }
                 }
-                info!(hc_id, "Speaker stale after discovery timeout; unregistering");
+                info!(
+                    hc_id,
+                    "Speaker stale after discovery timeout; unregistering"
+                );
                 if let Err(e) = self.publisher.unregister_device(&hc_id).await {
                     warn!(hc_id, error = %e, "Failed to unregister stale speaker");
                 }
@@ -517,7 +525,7 @@ impl Bridge {
             return;
         }
 
-        let favorites = match content::favorite_titles(&speaker).await {
+        let favorite_catalog = match content::list_favorites(&speaker).await {
             Ok(items) => items,
             Err(e) => {
                 warn!(hc_id, error = %e, "Failed to fetch Sonos favorites");
@@ -525,13 +533,17 @@ impl Bridge {
             }
         };
 
-        let playlists = match content::playlist_titles(&speaker).await {
+        let playlist_catalog = match content::list_playlists(&speaker).await {
             Ok(items) => items,
             Err(e) => {
                 warn!(hc_id, error = %e, "Failed to fetch Sonos playlists");
                 return;
             }
         };
+        let favorites = catalog_titles(&favorite_catalog);
+        let playlists = catalog_titles(&playlist_catalog);
+        let favorite_items = catalog_items_with_art(&speaker, &favorite_catalog);
+        let playlist_items = catalog_items_with_art(&speaker, &playlist_catalog);
 
         let state_to_publish = {
             let mut st = self.state.write().await;
@@ -540,11 +552,17 @@ impl Bridge {
             };
             let state = entry.last_state.get_or_insert_with(SpeakerState::default);
 
-            if state.available_favorites == favorites && state.available_playlists == playlists {
+            if state.available_favorites == favorites
+                && state.available_playlists == playlists
+                && state.available_favorite_items == favorite_items
+                && state.available_playlist_items == playlist_items
+            {
                 None
             } else {
                 state.available_favorites = favorites;
                 state.available_playlists = playlists;
+                state.available_favorite_items = favorite_items;
+                state.available_playlist_items = playlist_items;
                 Some(speaker::to_json(state))
             }
         };
@@ -620,4 +638,35 @@ fn speaker_host_port(speaker: &Speaker) -> String {
     let host = url.host().unwrap_or("127.0.0.1");
     let port = url.port_u16().unwrap_or(1400);
     format!("{host}:{port}")
+}
+
+fn catalog_titles(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|item| item.get("title").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+fn catalog_items_with_art(speaker: &Speaker, items: &[Value]) -> Vec<Value> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let title = item.get("title")?.as_str()?.trim();
+            if title.is_empty() {
+                return None;
+            }
+
+            let mut summary = json!({ "title": title });
+            if let Some(art) = item.get("albumArtUri").and_then(Value::as_str) {
+                let art = art.trim();
+                if !art.is_empty() {
+                    let absolute = speaker::absolutize_media_url(speaker, art);
+                    summary["albumArtUri"] = json!(absolute);
+                    summary["image_url"] = json!(absolute);
+                }
+            }
+            Some(summary)
+        })
+        .collect()
 }
