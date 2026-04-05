@@ -3,13 +3,13 @@ mod bridge;
 mod config;
 mod discovery;
 mod events;
-mod homecore;
 mod logging;
 mod shared_state;
 mod speaker;
 mod subscription;
 
 use anyhow::Result;
+use plugin_sdk_rs::{PluginClient, PluginConfig};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -29,7 +29,7 @@ async fn main() {
         .nth(1)
         .unwrap_or_else(|| "config/config.toml".to_string());
 
-    let _log_guard = init_logging(&config_path);
+    let (_log_guard, log_level_handle) = init_logging(&config_path);
 
     let cfg = match SonosConfig::load(&config_path) {
         Ok(c) => c,
@@ -41,7 +41,7 @@ async fn main() {
 
     for attempt in 1..=MAX_ATTEMPTS {
         info!(attempt, max = MAX_ATTEMPTS, "Starting hc-sonos plugin");
-        match try_start(&cfg).await {
+        match try_start(&cfg, &config_path, log_level_handle.clone()).await {
             Ok(()) => return,
             Err(e) => {
                 if attempt < MAX_ATTEMPTS {
@@ -60,7 +60,7 @@ async fn main() {
 // Logging
 // ---------------------------------------------------------------------------
 
-fn init_logging(config_path: &str) -> tracing_appender::non_blocking::WorkerGuard {
+fn init_logging(config_path: &str) -> (tracing_appender::non_blocking::WorkerGuard, hc_logging::LogLevelHandle) {
     #[derive(serde::Deserialize, Default)]
     struct Bootstrap {
         #[serde(default)]
@@ -77,20 +77,50 @@ fn init_logging(config_path: &str) -> tracing_appender::non_blocking::WorkerGuar
 // Startup
 // ---------------------------------------------------------------------------
 
-async fn try_start(cfg: &SonosConfig) -> Result<()> {
+async fn try_start(cfg: &SonosConfig, config_path: &str, log_level_handle: hc_logging::LogLevelHandle) -> Result<()> {
     // ── Shared Sonos speaker state (bridge + HTTP API) ─────────────────────
     let app_state = shared_state::new_state();
 
-    // ── HomeCore MQTT ─────────────────────────────────────────────────────
-    let hc_client = homecore::HomecoreClient::connect(&cfg.homecore).await?;
-    let publisher = hc_client.publisher();
-    let (hc_tx, hc_rx) = mpsc::channel::<(String, serde_json::Value)>(256);
+    // ── HomeCore SDK ─────────────────────────────────────────────────────
+    let sdk_config = PluginConfig {
+        broker_host: cfg.homecore.broker_host.clone(),
+        broker_port: cfg.homecore.broker_port,
+        plugin_id:   cfg.homecore.plugin_id.clone(),
+        password:    cfg.homecore.password.clone(),
+    };
+
+    let client = PluginClient::connect(sdk_config).await?;
+    let publisher = client.device_publisher();
+    let (cmd_tx, cmd_rx) = mpsc::channel::<(String, serde_json::Value)>(256);
+
+    // Enable management protocol (heartbeat + remote config/log commands).
+    let mgmt = client
+        .enable_management(
+            60,
+            Some(env!("CARGO_PKG_VERSION").to_string()),
+            Some(config_path.to_string()),
+            Some(log_level_handle),
+        )
+        .await?;
 
     // ── Discovery channel ─────────────────────────────────────────────────
     let (discovery_tx, discovery_rx) = mpsc::channel::<sonor::Speaker>(32);
 
-    // ── Spawn HomeCore MQTT event loop ────────────────────────────────────
-    tokio::spawn(hc_client.run(hc_tx));
+    // ── Spawn SDK event loop ─────────────────────────────────────────────
+    let cmd_tx_clone = cmd_tx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = client
+            .run_managed(
+                move |device_id, payload| {
+                    let _ = cmd_tx_clone.try_send((device_id, payload));
+                },
+                mgmt,
+            )
+            .await
+        {
+            error!(error = %e, "SDK event loop exited with error");
+        }
+    });
 
     // ── Spawn discovery task ──────────────────────────────────────────────
     discovery::spawn(
@@ -125,9 +155,9 @@ async fn try_start(cfg: &SonosConfig) -> Result<()> {
         "hc-sonos started (GENA mode)"
     );
 
-    // ── Run bridge (blocks until HomeCore channel closes) ─────────────────
+    // ── Run bridge (blocks until command channel closes) ─────────────────
     let bridge = bridge::Bridge::new(cfg, publisher, app_state);
-    bridge.run(discovery_rx, hc_rx, event_rx).await;
+    bridge.run(discovery_rx, cmd_rx, event_rx).await;
 
     Ok(())
 }

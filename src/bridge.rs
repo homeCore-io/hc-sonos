@@ -19,10 +19,10 @@ use tracing::{debug, info, warn};
 use crate::api::content;
 use crate::config::{DeviceConfig, SonosConfig};
 use crate::events::NotifyEvent;
-use crate::homecore::HomecorePublisher;
 use crate::shared_state::{AppState, SpeakerEntry};
 use crate::speaker::{self, SpeakerState};
 use crate::subscription;
+use plugin_sdk_rs::DevicePublisher;
 
 const HEARTBEAT_SECS: u64 = 60;
 const ZONE_POLL_SECS: u64 = 300;
@@ -32,14 +32,14 @@ pub struct Bridge {
     state: AppState,
     hc_to_uuid: HashMap<String, String>,
     config_map: HashMap<String, DeviceConfig>,
-    publisher: HomecorePublisher,
+    publisher: DevicePublisher,
     /// Base URL for GENA callbacks, e.g. `"http://192.168.1.10:5005"`.
     callback_base: String,
     stale_after: Duration,
 }
 
 impl Bridge {
-    pub fn new(cfg: &SonosConfig, publisher: HomecorePublisher, state: AppState) -> Self {
+    pub fn new(cfg: &SonosConfig, publisher: DevicePublisher, state: AppState) -> Self {
         let config_map = cfg
             .devices
             .iter()
@@ -176,7 +176,7 @@ impl Bridge {
 
         if let Err(e) = self
             .publisher
-            .register_device(&hc_id, &display_name, "media_player", area.as_deref())
+            .register_device_full(&hc_id, &display_name, Some("media_player"), area.as_deref(), None)
             .await
         {
             warn!(hc_id, error = %e, "Failed to register device");
@@ -420,7 +420,7 @@ impl Bridge {
                     hc_id,
                     "Speaker stale after discovery timeout; unregistering"
                 );
-                if let Err(e) = self.publisher.unregister_device(&hc_id).await {
+                if let Err(e) = self.publisher.unregister_device(self.publisher.plugin_id(), &hc_id).await {
                     warn!(hc_id, error = %e, "Failed to unregister stale speaker");
                 }
             }
