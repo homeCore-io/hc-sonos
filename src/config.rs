@@ -12,6 +12,8 @@ pub struct SonosConfig {
     #[serde(default)]
     pub api: ApiConfig,
     #[serde(default)]
+    pub logging: crate::logging::LoggingConfig,
+    #[serde(default)]
     pub devices: Vec<DeviceConfig>,
 }
 
