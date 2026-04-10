@@ -41,7 +41,14 @@ async fn main() {
 
     for attempt in 1..=MAX_ATTEMPTS {
         info!(attempt, max = MAX_ATTEMPTS, "Starting hc-sonos plugin");
-        match try_start(&cfg, &config_path, log_level_handle.clone(), mqtt_log_handle.clone()).await {
+        match try_start(
+            &cfg,
+            &config_path,
+            log_level_handle.clone(),
+            mqtt_log_handle.clone(),
+        )
+        .await
+        {
             Ok(()) => return,
             Err(e) => {
                 if attempt < MAX_ATTEMPTS {
@@ -60,7 +67,13 @@ async fn main() {
 // Logging
 // ---------------------------------------------------------------------------
 
-fn init_logging(config_path: &str) -> (tracing_appender::non_blocking::WorkerGuard, hc_logging::LogLevelHandle, plugin_sdk_rs::mqtt_log_layer::MqttLogHandle) {
+fn init_logging(
+    config_path: &str,
+) -> (
+    tracing_appender::non_blocking::WorkerGuard,
+    hc_logging::LogLevelHandle,
+    plugin_sdk_rs::mqtt_log_layer::MqttLogHandle,
+) {
     #[derive(serde::Deserialize, Default)]
     struct Bootstrap {
         #[serde(default)]
@@ -77,7 +90,12 @@ fn init_logging(config_path: &str) -> (tracing_appender::non_blocking::WorkerGua
 // Startup
 // ---------------------------------------------------------------------------
 
-async fn try_start(cfg: &SonosConfig, config_path: &str, log_level_handle: hc_logging::LogLevelHandle, mqtt_log_handle: plugin_sdk_rs::mqtt_log_layer::MqttLogHandle) -> Result<()> {
+async fn try_start(
+    cfg: &SonosConfig,
+    config_path: &str,
+    log_level_handle: hc_logging::LogLevelHandle,
+    mqtt_log_handle: plugin_sdk_rs::mqtt_log_layer::MqttLogHandle,
+) -> Result<()> {
     // ── Shared Sonos speaker state (bridge + HTTP API) ─────────────────────
     let app_state = shared_state::new_state();
 
@@ -85,8 +103,8 @@ async fn try_start(cfg: &SonosConfig, config_path: &str, log_level_handle: hc_lo
     let sdk_config = PluginConfig {
         broker_host: cfg.homecore.broker_host.clone(),
         broker_port: cfg.homecore.broker_port,
-        plugin_id:   cfg.homecore.plugin_id.clone(),
-        password:    cfg.homecore.password.clone(),
+        plugin_id: cfg.homecore.plugin_id.clone(),
+        password: cfg.homecore.password.clone(),
     };
 
     let client = PluginClient::connect(sdk_config).await?;

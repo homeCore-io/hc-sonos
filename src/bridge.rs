@@ -176,7 +176,13 @@ impl Bridge {
 
         if let Err(e) = self
             .publisher
-            .register_device_full(&hc_id, &display_name, Some("media_player"), area.as_deref(), None)
+            .register_device_full(
+                &hc_id,
+                &display_name,
+                Some("media_player"),
+                area.as_deref(),
+                None,
+            )
             .await
         {
             warn!(hc_id, error = %e, "Failed to register device");
@@ -420,7 +426,11 @@ impl Bridge {
                     hc_id,
                     "Speaker stale after discovery timeout; unregistering"
                 );
-                if let Err(e) = self.publisher.unregister_device(self.publisher.plugin_id(), &hc_id).await {
+                if let Err(e) = self
+                    .publisher
+                    .unregister_device(self.publisher.plugin_id(), &hc_id)
+                    .await
+                {
                     warn!(hc_id, error = %e, "Failed to unregister stale speaker");
                 }
             }
