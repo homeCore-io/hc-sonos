@@ -116,6 +116,12 @@ async fn try_start(
     let publisher = client.device_publisher();
     let (cmd_tx, cmd_rx) = mpsc::channel::<(String, serde_json::Value)>(256);
 
+    // ── Manual rediscover signal ──────────────────────────────────────────
+    // `rediscover_speakers` manifest action pings this so the discovery
+    // loop runs an immediate scan instead of waiting for the next
+    // `discovery_interval_secs` tick.
+    let (rescan_tx, rescan_rx) = mpsc::channel::<()>(8);
+
     // Enable management protocol (heartbeat + remote config/log commands).
     let mgmt = client
         .enable_management(
@@ -124,7 +130,15 @@ async fn try_start(
             Some(config_path.to_string()),
             Some(log_level_handle),
         )
-        .await?;
+        .await?
+        .with_capabilities(capabilities_manifest())
+        .with_custom_handler(move |cmd| match cmd["action"].as_str()? {
+            "rediscover_speakers" => {
+                let _ = rescan_tx.try_send(());
+                Some(serde_json::json!({ "status": "ok" }))
+            }
+            _ => None,
+        });
 
     // ── Discovery channel ─────────────────────────────────────────────────
     let (discovery_tx, discovery_rx) = mpsc::channel::<sonor::Speaker>(32);
@@ -151,6 +165,7 @@ async fn try_start(
         Duration::from_secs(cfg.sonos.discovery_timeout_secs),
         cfg.sonos.manual_hosts.clone(),
         discovery_tx,
+        rescan_rx,
     );
 
     // ── GENA event channel (Sonos → API handler → bridge) ────────────────
@@ -183,4 +198,37 @@ async fn try_start(
     bridge.run(discovery_rx, cmd_rx, event_rx).await;
 
     Ok(())
+}
+
+/// Capability manifest for hc-sonos. SSDP discovery is finicky on
+/// dual-NIC hosts and across Wi-Fi mesh segments; the manual rediscover
+/// action lets ops kick a fresh scan without restarting the plugin.
+fn capabilities_manifest() -> hc_types::Capabilities {
+    use hc_types::{Action, Capabilities, Concurrency, RequiresRole};
+    Capabilities {
+        spec: "1".into(),
+        plugin_id: String::new(), // SDK fills from configured plugin_id
+        actions: vec![Action {
+            id: "rediscover_speakers".into(),
+            label: "Rediscover speakers".into(),
+            description: Some(
+                "Run an immediate SSDP + manual-host discovery sweep \
+                 instead of waiting for the next `discovery_interval_secs` \
+                 tick. Useful after adding or moving a Sonos speaker on \
+                 the network, or when SSDP didn't pick up a speaker on \
+                 the previous cycle (multi-NIC hosts, Wi-Fi mesh \
+                 segments)."
+                    .into(),
+            ),
+            params: None,
+            result: None,
+            stream: false,
+            cancelable: false,
+            concurrency: Concurrency::default(),
+            item_key: None,
+            item_operations: None,
+            requires_role: RequiresRole::User,
+            timeout_ms: None,
+        }],
+    }
 }

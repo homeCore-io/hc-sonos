@@ -15,16 +15,35 @@ use tracing::{debug, info, warn};
 ///
 /// `tx` receives each discovered speaker exactly once per discovery cycle
 /// (duplicates across cycles are fine — the bridge deduplicates by UUID).
+///
+/// `rescan_rx` short-circuits the inter-cycle sleep — the manifest's
+/// `rediscover_speakers` action pings it for an immediate scan rather
+/// than waiting for the next periodic tick. SSDP is finicky on
+/// dual-NIC hosts and behind some Wi-Fi routers; a one-click rescan
+/// lets ops nudge it instead of restarting the plugin.
 pub fn spawn(
     discovery_interval: Duration,
     discovery_timeout: Duration,
     manual_hosts: Vec<String>,
     tx: mpsc::Sender<sonor::Speaker>,
+    mut rescan_rx: mpsc::Receiver<()>,
 ) {
     tokio::spawn(async move {
         loop {
             run_once(&discovery_timeout, &manual_hosts, &tx).await;
-            tokio::time::sleep(discovery_interval).await;
+            tokio::select! {
+                _ = tokio::time::sleep(discovery_interval) => {}
+                sig = rescan_rx.recv() => {
+                    match sig {
+                        Some(()) => info!("Manual rediscover_speakers requested"),
+                        None => {
+                            // Sender dropped — keep doing periodic scans
+                            // forever. Falling out of the select! goes
+                            // straight back to the next run_once.
+                        }
+                    }
+                }
+            }
         }
     });
 }
