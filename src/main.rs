@@ -107,7 +107,13 @@ async fn try_start(
         password: cfg.homecore.password.clone(),
     };
 
-    let client = PluginClient::connect(sdk_config).await?;
+    let client = PluginClient::connect(sdk_config)
+        .await?
+        // Cross-restart device tracking — SDK mirrors every speaker
+        // register/unregister to disk so retire_stale_speakers can
+        // reconcile across restarts (catches speakers physically
+        // removed while the plugin was offline).
+        .with_device_persistence(published_ids_path(config_path));
     mqtt_log_handle.connect(
         client.mqtt_client(),
         &cfg.homecore.plugin_id,
@@ -231,4 +237,13 @@ fn capabilities_manifest() -> hc_types::Capabilities {
             timeout_ms: None,
         }],
     }
+}
+
+/// Path of the cross-restart device-id snapshot, sibling to
+/// config.toml. Owned by the SDK device tracker.
+fn published_ids_path(config_path: &str) -> std::path::PathBuf {
+    std::path::Path::new(config_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(".published-device-ids.json")
 }

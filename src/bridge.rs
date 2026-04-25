@@ -435,6 +435,16 @@ impl Bridge {
                 }
             }
         }
+
+        // Cross-restart cleanup: SDK has the persisted set of every
+        // hc_id this plugin has ever registered. Anything in there
+        // but not in the current live set (speakers physically gone
+        // since last run) gets unregistered + dropped from the
+        // snapshot.
+        let live: std::collections::HashSet<String> = self.hc_to_uuid.keys().cloned().collect();
+        if let Err(e) = self.publisher.reconcile_devices(live).await {
+            warn!(error = %e, "reconcile_devices failed");
+        }
     }
 
     // ── Zone group topology ───────────────────────────────────────────────────
