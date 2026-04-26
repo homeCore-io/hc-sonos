@@ -2,6 +2,7 @@ mod api;
 mod bridge;
 mod config;
 mod discovery;
+mod discovery_action;
 mod events;
 mod logging;
 mod shared_state;
@@ -128,26 +129,42 @@ async fn try_start(
     // `discovery_interval_secs` tick.
     let (rescan_tx, rescan_rx) = mpsc::channel::<()>(8);
 
-    // Enable management protocol (heartbeat + remote config/log commands).
-    let mgmt = client
-        .enable_management(
-            60,
-            Some(env!("CARGO_PKG_VERSION").to_string()),
-            Some(config_path.to_string()),
-            Some(log_level_handle),
-        )
-        .await?
-        .with_capabilities(capabilities_manifest())
-        .with_custom_handler(move |cmd| match cmd["action"].as_str()? {
-            "rediscover_speakers" => {
-                let _ = rescan_tx.try_send(());
-                Some(serde_json::json!({ "status": "ok" }))
-            }
-            _ => None,
-        });
-
     // ── Discovery channel ─────────────────────────────────────────────────
+    // Created before management wiring so the streaming
+    // `discover_speakers` action can hold a clone of the sender and
+    // forward newly-found speakers into the bridge's integration path.
     let (discovery_tx, discovery_rx) = mpsc::channel::<sonor::Speaker>(32);
+    let discovery_tx_for_action = discovery_tx.clone();
+    let cfg_for_action = cfg.clone();
+
+    // Enable management protocol (heartbeat + remote config/log commands).
+    let mgmt =
+        client
+            .enable_management(
+                60,
+                Some(env!("CARGO_PKG_VERSION").to_string()),
+                Some(config_path.to_string()),
+                Some(log_level_handle),
+            )
+            .await?
+            .with_capabilities(capabilities_manifest())
+            .with_custom_handler(move |cmd| match cmd["action"].as_str()? {
+                "rediscover_speakers" => {
+                    let _ = rescan_tx.try_send(());
+                    Some(serde_json::json!({ "status": "ok" }))
+                }
+                _ => None,
+            })
+            .with_streaming_action(plugin_sdk_rs::StreamingAction::new(
+                "discover_speakers",
+                move |ctx, _params| {
+                    let cfg = cfg_for_action.clone();
+                    let bridge_tx = discovery_tx_for_action.clone();
+                    async move {
+                        discovery_action::discover_speakers_streaming(ctx, cfg, bridge_tx).await
+                    }
+                },
+            ));
 
     // ── Spawn SDK event loop ─────────────────────────────────────────────
     let cmd_tx_clone = cmd_tx.clone();
@@ -214,28 +231,57 @@ fn capabilities_manifest() -> hc_types::Capabilities {
     Capabilities {
         spec: "1".into(),
         plugin_id: String::new(), // SDK fills from configured plugin_id
-        actions: vec![Action {
-            id: "rediscover_speakers".into(),
-            label: "Rediscover speakers".into(),
-            description: Some(
-                "Run an immediate SSDP + manual-host discovery sweep \
-                 instead of waiting for the next `discovery_interval_secs` \
-                 tick. Useful after adding or moving a Sonos speaker on \
-                 the network, or when SSDP didn't pick up a speaker on \
-                 the previous cycle (multi-NIC hosts, Wi-Fi mesh \
-                 segments)."
-                    .into(),
-            ),
-            params: None,
-            result: None,
-            stream: false,
-            cancelable: false,
-            concurrency: Concurrency::default(),
-            item_key: None,
-            item_operations: None,
-            requires_role: RequiresRole::User,
-            timeout_ms: None,
-        }],
+        actions: vec![
+            Action {
+                id: "rediscover_speakers".into(),
+                label: "Rediscover speakers".into(),
+                description: Some(
+                    "Run an immediate SSDP + manual-host discovery sweep \
+                     instead of waiting for the next `discovery_interval_secs` \
+                     tick. Useful after adding or moving a Sonos speaker on \
+                     the network, or when SSDP didn't pick up a speaker on \
+                     the previous cycle (multi-NIC hosts, Wi-Fi mesh \
+                     segments)."
+                        .into(),
+                ),
+                params: None,
+                result: None,
+                stream: false,
+                cancelable: false,
+                concurrency: Concurrency::default(),
+                item_key: None,
+                item_operations: None,
+                requires_role: RequiresRole::User,
+                timeout_ms: None,
+            },
+            Action {
+                id: "discover_speakers".into(),
+                label: "Discover speakers".into(),
+                description: Some(
+                    "Run SSDP / manual-host discovery and stream each \
+                     speaker as it's found (uuid, room name, host:port). \
+                     Found speakers are also forwarded into the bridge's \
+                     integration path, so any new ones get registered \
+                     automatically. Use this when you want to see what's \
+                     on the network right now — `rediscover_speakers` is \
+                     the lightweight fire-and-forget version that just \
+                     kicks the periodic loop."
+                        .into(),
+                ),
+                params: None,
+                result: Some(serde_json::json!({
+                    "discovered": { "type": "array" },
+                    "count": { "type": "integer" },
+                })),
+                stream: true,
+                cancelable: false,
+                concurrency: Concurrency::Single,
+                item_key: Some("uuid".into()),
+                item_operations: None,
+                requires_role: RequiresRole::User,
+                timeout_ms: Some(60_000),
+            },
+        ],
     }
 }
 

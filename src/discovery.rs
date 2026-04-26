@@ -48,7 +48,11 @@ pub fn spawn(
     });
 }
 
-async fn run_once(timeout: &Duration, manual_hosts: &[String], tx: &mpsc::Sender<sonor::Speaker>) {
+pub(crate) async fn run_once(
+    timeout: &Duration,
+    manual_hosts: &[String],
+    tx: &mpsc::Sender<sonor::Speaker>,
+) {
     // ── SSDP ─────────────────────────────────────────────────────────────────
     match sonor::discover(*timeout).await {
         Ok(stream) => {
