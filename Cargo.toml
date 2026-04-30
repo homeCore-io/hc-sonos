@@ -30,5 +30,3 @@ axum               = "0.7"
 tower              = "0.4"
 tower-http         = { version = "0.5", features = ["cors", "trace"] }
 roxmltree          = "0.18"
-
-# Size-optimized release profile (matches homeCore-io/homeCore).
