@@ -1,6 +1,6 @@
 # hc-sonos
 
-[![CI](https://github.com/homeCore-io/hc-sonos/actions/workflows/ci.yml/badge.svg)](https://github.com/homeCore-io/hc-sonos/actions/workflows/ci.yml) [![Release](https://github.com/homeCore-io/hc-sonos/actions/workflows/release.yml/badge.svg)](https://github.com/homeCore-io/hc-sonos/actions/workflows/release.yml) [![Dashboard](https://img.shields.io/badge/builds-dashboard-blue?style=flat-square)](https://homecore.io/lf-workflow-dash/)
+[![CI](https://github.com/homeCore-io/hc-sonos/actions/workflows/ci.yml/badge.svg)](https://github.com/homeCore-io/hc-sonos/actions/workflows/ci.yml) [![Release](https://github.com/homeCore-io/hc-sonos/actions/workflows/release.yml/badge.svg)](https://github.com/homeCore-io/hc-sonos/actions/workflows/release.yml) [![Dashboard](https://img.shields.io/badge/builds-dashboard-blue?style=flat-square)](https://homecore-io.github.io/ci-glance/)
 
 `hc-sonos` bridges Sonos speakers into HomeCore as `device_type=media_player` devices.
 
