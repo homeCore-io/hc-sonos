@@ -72,7 +72,7 @@ fn init_logging(
     config_path: &str,
 ) -> (
     tracing_appender::non_blocking::WorkerGuard,
-    hc_logging::LogLevelHandle,
+    plugin_sdk_rs::logging::LogLevelHandle,
     plugin_sdk_rs::mqtt_log_layer::MqttLogHandle,
 ) {
     #[derive(serde::Deserialize, Default)]
@@ -94,7 +94,7 @@ fn init_logging(
 async fn try_start(
     cfg: &SonosConfig,
     config_path: &str,
-    log_level_handle: hc_logging::LogLevelHandle,
+    log_level_handle: plugin_sdk_rs::logging::LogLevelHandle,
     mqtt_log_handle: plugin_sdk_rs::mqtt_log_layer::MqttLogHandle,
 ) -> Result<()> {
     // ── Shared Sonos speaker state (bridge + HTTP API) ─────────────────────
@@ -226,8 +226,8 @@ async fn try_start(
 /// Capability manifest for hc-sonos. SSDP discovery is finicky on
 /// dual-NIC hosts and across Wi-Fi mesh segments; the manual rediscover
 /// action lets ops kick a fresh scan without restarting the plugin.
-fn capabilities_manifest() -> hc_types::Capabilities {
-    use hc_types::{Action, Capabilities, Concurrency, RequiresRole};
+fn capabilities_manifest() -> plugin_sdk_rs::types::Capabilities {
+    use plugin_sdk_rs::types::{Action, Capabilities, Concurrency, RequiresRole};
     Capabilities {
         spec: "1".into(),
         plugin_id: String::new(), // SDK fills from configured plugin_id
