@@ -58,6 +58,30 @@ async fn get_speaker(state: &AppState, room: &str) -> Result<Speaker, Response> 
     }
 }
 
+/// Project raw content items (favorites/playlists) into a clean, stable list for
+/// HTTP responses: a 0-based `index` (the value `/:room/favorite/:index` expects),
+/// the Sonos object `id` for reference, plus title/uri/art. The bulky DIDL-Lite
+/// `metadata` blob used internally for playback is intentionally omitted.
+fn content_view(items: &[Value]) -> Value {
+    let list: Vec<Value> = items
+        .iter()
+        .enumerate()
+        .map(|(i, it)| {
+            let mut obj = json!({
+                "index": i,
+                "id":    it.get("id").cloned().unwrap_or(Value::Null),
+                "title": it.get("title").cloned().unwrap_or(Value::Null),
+                "uri":   it.get("uri").cloned().unwrap_or(Value::Null),
+            });
+            if let Some(a) = it.get("albumArtUri") {
+                obj["albumArtUri"] = a.clone();
+            }
+            obj
+        })
+        .collect();
+    json!({ "count": list.len(), "items": list })
+}
+
 fn repeat_to_str(r: &RepeatMode) -> &'static str {
     match r {
         RepeatMode::None => "none",
@@ -67,10 +91,10 @@ fn repeat_to_str(r: &RepeatMode) -> &'static str {
 }
 
 const LANDING_PAGE: &str = r#"<!doctype html>
-<html lang=\"en\">
+<html lang="en">
 <head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>HomeCore Sonos API</title>
     <style>
         :root {
@@ -87,7 +111,7 @@ const LANDING_PAGE: &str = r#"<!doctype html>
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: \"Segoe UI\", sans-serif;
+            font-family: "Segoe UI", sans-serif;
             background: radial-gradient(1200px 800px at 85% -10%, #1f2f3f 0%, var(--bg) 55%);
             color: var(--text);
             line-height: 1.45;
@@ -133,7 +157,7 @@ const LANDING_PAGE: &str = r#"<!doctype html>
             border-radius: 8px;
             background: var(--code);
             border: 1px solid #1f2a35;
-            font-family: \"Consolas\", \"DejaVu Sans Mono\", monospace;
+            font-family: "Consolas", "DejaVu Sans Mono", monospace;
             font-size: 0.89rem;
             color: #d5e6f7;
             text-decoration: none;
@@ -151,7 +175,7 @@ const LANDING_PAGE: &str = r#"<!doctype html>
             border: 1px solid #1f2a35;
             border-radius: 8px;
             padding: 10px;
-            font-family: \"Consolas\", \"DejaVu Sans Mono\", monospace;
+            font-family: "Consolas", "DejaVu Sans Mono", monospace;
             font-size: 0.85rem;
             color: #cfe2f5;
             white-space: pre-wrap;
@@ -173,88 +197,88 @@ const LANDING_PAGE: &str = r#"<!doctype html>
     </style>
 </head>
 <body>
-    <div class=\"wrap\">
-        <section class=\"hero\">
+    <div class="wrap">
+        <section class="hero">
             <h1>HomeCore Sonos Control API</h1>
             <p>Direct HTTP controls for Sonos speakers discovered by this plugin.</p>
-            <span class=\"chip\">Route style: node-sonos-http-api compatible</span>
-            <span class=\"chip\">JSON responses</span>
-            <span class=\"chip\">All control endpoints use GET</span>
+            <span class="chip">Route style: node-sonos-http-api compatible</span>
+            <span class="chip">JSON responses</span>
+            <span class="chip">All control endpoints use GET</span>
         </section>
 
-        <section class=\"grid\">
-            <article class=\"card\">
+        <section class="grid">
+            <article class="card">
                 <h2>System Endpoints</h2>
-                <a class=\"ep\" href=\"/zones\"><span class=\"method\">GET</span>/zones</a>
-                <a class=\"ep\" href=\"/favorites\"><span class=\"method\">GET</span>/favorites</a>
-                <a class=\"ep\" href=\"/playlists\"><span class=\"method\">GET</span>/playlists</a>
-                <a class=\"ep\" href=\"/pauseall\"><span class=\"method\">GET</span>/pauseall</a>
+                <a class="ep" href="/zones"><span class="method">GET</span>/zones</a>
+                <a class="ep" href="/favorites"><span class="method">GET</span>/favorites</a>
+                <a class="ep" href="/playlists"><span class="method">GET</span>/playlists</a>
+                <a class="ep" href="/pauseall"><span class="method">GET</span>/pauseall</a>
             </article>
 
-            <article class=\"card\">
+            <article class="card">
                 <h2>Room State and Queue</h2>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/state</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/queue</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/favorites</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/playlists</div>
-                <div class=\"example\">Examples:
+                <div class="ep"><span class="method">GET</span>/:room/state</div>
+                <div class="ep"><span class="method">GET</span>/:room/queue</div>
+                <div class="ep"><span class="method">GET</span>/:room/favorites</div>
+                <div class="ep"><span class="method">GET</span>/:room/playlists</div>
+                <div class="example">Examples:
 GET /Living%20Room/state
 GET /Kitchen/queue</div>
             </article>
 
-            <article class=\"card\">
+            <article class="card">
                 <h2>Transport</h2>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/play</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/pause</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/playpause</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/stop</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/next</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/previous</div>
+                <div class="ep"><span class="method">GET</span>/:room/play</div>
+                <div class="ep"><span class="method">GET</span>/:room/pause</div>
+                <div class="ep"><span class="method">GET</span>/:room/playpause</div>
+                <div class="ep"><span class="method">GET</span>/:room/stop</div>
+                <div class="ep"><span class="method">GET</span>/:room/next</div>
+                <div class="ep"><span class="method">GET</span>/:room/previous</div>
             </article>
 
-            <article class=\"card\">
+            <article class="card">
                 <h2>Volume and EQ</h2>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/volume/:level</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/mute</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/unmute</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/togglemute</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/bass/:level</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/treble/:level</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/loudness/:state</div>
-                <div class=\"example\">Valid values:
+                <div class="ep"><span class="method">GET</span>/:room/volume/:level</div>
+                <div class="ep"><span class="method">GET</span>/:room/mute</div>
+                <div class="ep"><span class="method">GET</span>/:room/unmute</div>
+                <div class="ep"><span class="method">GET</span>/:room/togglemute</div>
+                <div class="ep"><span class="method">GET</span>/:room/bass/:level</div>
+                <div class="ep"><span class="method">GET</span>/:room/treble/:level</div>
+                <div class="ep"><span class="method">GET</span>/:room/loudness/:state</div>
+                <div class="example">Valid values:
 volume: 0..100, +N, -N
 bass/treble: -10..10
 state: on | off | toggle</div>
             </article>
 
-            <article class=\"card\">
+            <article class="card">
                 <h2>Modes, Seek, Grouping</h2>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/shuffle/:state</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/repeat/:state</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/crossfade/:state</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/seek/:seconds</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/seekby/:seconds</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/trackseek/:index</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/join/:target</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/leave</div>
+                <div class="ep"><span class="method">GET</span>/:room/shuffle/:state</div>
+                <div class="ep"><span class="method">GET</span>/:room/repeat/:state</div>
+                <div class="ep"><span class="method">GET</span>/:room/crossfade/:state</div>
+                <div class="ep"><span class="method">GET</span>/:room/seek/:seconds</div>
+                <div class="ep"><span class="method">GET</span>/:room/seekby/:seconds</div>
+                <div class="ep"><span class="method">GET</span>/:room/trackseek/:index</div>
+                <div class="ep"><span class="method">GET</span>/:room/join/:target</div>
+                <div class="ep"><span class="method">GET</span>/:room/leave</div>
             </article>
 
-            <article class=\"card\">
+            <article class="card">
                 <h2>Queue and Content Playback</h2>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/clearqueue</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/queue/remove/:index</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/queue/adduri/:uri</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/queue/addnexturi/:uri</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/favorite/:index</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/playlist/:index</div>
-                <div class=\"ep\"><span class=\"method\">GET</span>/:room/playuri/:uri</div>
-                <div class=\"note\">URI path segments must be URL-encoded before calling.</div>
+                <div class="ep"><span class="method">GET</span>/:room/clearqueue</div>
+                <div class="ep"><span class="method">GET</span>/:room/queue/remove/:index</div>
+                <div class="ep"><span class="method">GET</span>/:room/queue/adduri/:uri</div>
+                <div class="ep"><span class="method">GET</span>/:room/queue/addnexturi/:uri</div>
+                <div class="ep"><span class="method">GET</span>/:room/favorite/:index</div>
+                <div class="ep"><span class="method">GET</span>/:room/playlist/:index</div>
+                <div class="ep"><span class="method">GET</span>/:room/playuri/:uri</div>
+                <div class="note">URI path segments must be URL-encoded before calling.</div>
             </article>
         </section>
 
-        <section class=\"card\">
+        <section class="card">
             <h2>Quick Start</h2>
-            <div class=\"example\">1) List available zones:
+            <div class="example">1) List available zones:
 GET /zones
 
 2) Start playback in Living Room:
@@ -267,7 +291,7 @@ GET /Living%20Room/volume/35
 GET /Living%20Room/favorite/0</div>
         </section>
 
-        <div class=\"footer\">
+        <div class="footer">
             Sonos callback endpoint used internally: ANY /sonos/callback/:uuid/:service
         </div>
     </div>
@@ -359,7 +383,7 @@ pub async fn all_favorites(State(state): State<AppState>) -> Response {
     match speaker {
         None => err_resp(StatusCode::SERVICE_UNAVAILABLE, "no speakers available"),
         Some(sp) => match content::list_favorites(&sp).await {
-            Ok(items) => Json(json!(items)).into_response(),
+            Ok(items) => Json(content_view(&items)).into_response(),
             Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
         },
     }
@@ -377,7 +401,7 @@ pub async fn all_playlists(State(state): State<AppState>) -> Response {
     match speaker {
         None => err_resp(StatusCode::SERVICE_UNAVAILABLE, "no speakers available"),
         Some(sp) => match content::list_playlists(&sp).await {
-            Ok(items) => Json(json!(items)).into_response(),
+            Ok(items) => Json(content_view(&items)).into_response(),
             Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
         },
     }
@@ -440,7 +464,7 @@ pub async fn room_favorites(Path(room): Path<String>, State(state): State<AppSta
         Err(r) => return r,
     };
     match content::list_favorites(&sp).await {
-        Ok(items) => Json(json!(items)).into_response(),
+        Ok(items) => Json(content_view(&items)).into_response(),
         Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
     }
 }
@@ -452,7 +476,7 @@ pub async fn room_playlists(Path(room): Path<String>, State(state): State<AppSta
         Err(r) => return r,
     };
     match content::list_playlists(&sp).await {
-        Ok(items) => Json(json!(items)).into_response(),
+        Ok(items) => Json(content_view(&items)).into_response(),
         Err(e) => err_resp(StatusCode::BAD_GATEWAY, e),
     }
 }
