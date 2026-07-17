@@ -166,6 +166,13 @@ async fn try_start(
                 },
             ));
 
+    // Publish the operator-config JSON Schema so the hc-web editor renders a
+    // typed form (rides on the capability manifest).
+    let mgmt = match config::config_schema() {
+        Some(schema) => mgmt.with_config_schema(schema),
+        None => mgmt,
+    };
+
     // ── Spawn SDK event loop ─────────────────────────────────────────────
     let cmd_tx_clone = cmd_tx.clone();
     tokio::spawn(async move {

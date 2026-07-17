@@ -3,7 +3,20 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+/// Operator-config JSON Schema, published on the capability manifest so the
+/// hc-web editor renders a typed form. `None` without the `schema` feature.
+#[cfg(feature = "schema")]
+pub fn config_schema() -> Option<serde_json::Value> {
+    serde_json::to_value(schemars::schema_for!(SonosConfig)).ok()
+}
+
+#[cfg(not(feature = "schema"))]
+pub fn config_schema() -> Option<serde_json::Value> {
+    None
+}
+
 #[derive(Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SonosConfig {
     #[serde(default)]
     pub homecore: HomecoreConfig,
@@ -26,6 +39,7 @@ impl SonosConfig {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HomecoreConfig {
     #[serde(default = "default_broker_host")]
     pub broker_host: String,
@@ -49,6 +63,7 @@ impl Default for HomecoreConfig {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SonosSection {
     /// How often to re-run SSDP discovery (seconds).
     #[serde(default = "default_discovery_interval_secs")]
@@ -75,6 +90,7 @@ impl Default for SonosSection {
 /// has a matching UUID will use these hc_id / name / area values instead of
 /// the auto-generated ones.
 #[derive(Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DeviceConfig {
     /// Sonos speaker UUID (e.g. "RINCON_347E5C3D12E401400").
     pub uuid: String,
@@ -89,6 +105,7 @@ pub struct DeviceConfig {
 /// HTTP API configuration.  The API runs its own Axum server, completely
 /// independent of HomeCore.  Disable with `enabled = false`.
 #[derive(Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ApiConfig {
     #[serde(default = "default_api_host")]
     pub host: String,
