@@ -15,6 +15,137 @@ pub fn config_schema() -> Option<serde_json::Value> {
     None
 }
 
+/// The plugin's own **config descriptor** — how this configuration should be
+/// presented, which a JSON Schema cannot express: units, conditionals, live
+/// data sources, and prose.
+///
+/// Published on the capability manifest; core serves it at
+/// `GET /plugins/{id}/config/descriptor` and the editor renders it directly
+/// instead of guessing a form from the schema.
+///
+/// Note the Speakers section binds to the **live device registry** rather than
+/// this file's `[[devices]]` array: naming and room assignment belong to the
+/// device registry (core owns inventory), so those edits go to `/devices`.
+pub fn config_descriptor() -> serde_json::Value {
+    serde_json::json!({
+        "plugin_id": "plugin.sonos",
+        "descriptor_version": 1,
+        "title": "Sonos",
+        "sections": [
+            {
+                "id": "discovery",
+                "title": "Discovery",
+                "fields": [
+                    {
+                        "key": "sonos.discovery_interval_secs",
+                        "kind": "duration", "unit": "secs",
+                        "label": "Discovery interval", "default": 60, "min": 5,
+                        "help": "How often to re-run SSDP discovery."
+                    },
+                    {
+                        "key": "sonos.discovery_timeout_secs",
+                        "kind": "duration", "unit": "secs",
+                        "label": "Scan duration", "default": 5, "min": 1,
+                        "help": "How long each SSDP scan listens."
+                    },
+                    {
+                        "key": "sonos.manual_hosts",
+                        "kind": "list", "item": "host",
+                        "label": "Manual hosts", "default": [],
+                        "help": "Static speaker IPs to probe in addition to SSDP \
+                                 — useful across subnets where multicast is dropped."
+                    }
+                ]
+            },
+            {
+                "id": "api",
+                "title": "HTTP API",
+                "fields": [
+                    { "key": "api.enabled", "kind": "toggle",
+                      "label": "Enable HTTP API", "default": true },
+                    { "kind": "note",
+                      "text": "A standalone web interface (independent of homeCore) for \
+                               exploring each speaker — browse favorites and playlists, see \
+                               now-playing and group state, and read diagnostics. Handy for \
+                               content discovery and debugging.",
+                      "visible_when": { "field": "api.enabled", "truthy": true } },
+                    { "kind": "link", "label": "Open web interface",
+                      "help": "Opens the Sonos HTTP API in a new tab.",
+                      "href": "http://{client_host}:{api.port}/",
+                      "visible_when": { "field": "api.enabled", "truthy": true } },
+                    { "key": "api.host", "kind": "host", "label": "Bind address",
+                      "default": "0.0.0.0",
+                      "visible_when": { "field": "api.enabled", "truthy": true } },
+                    { "key": "api.port", "kind": "port", "label": "Port",
+                      "default": 5005,
+                      "visible_when": { "field": "api.enabled", "truthy": true } },
+                    { "key": "api.callback_host", "kind": "host",
+                      "label": "Callback host",
+                      "help": "The LAN IP speakers reach for GENA event callbacks.",
+                      "visible_when": { "field": "api.enabled", "truthy": true },
+                      "required_when": { "field": "api.host", "in": ["0.0.0.0", "::"] } },
+                    { "kind": "note",
+                      "text": "When the API binds all interfaces (0.0.0.0), speakers need a \
+                               concrete LAN IP to deliver event callbacks — set Callback host \
+                               to this machine's address.",
+                      "visible_when": { "field": "api.host", "in": ["0.0.0.0", "::"] } }
+                ]
+            },
+            {
+                "id": "speakers",
+                "title": "Speakers",
+                "fields": [
+                    {
+                        "key": "devices",
+                        "kind": "table", "render": "cards", "key_by": "device_id",
+                        "label": "Speakers",
+                        "help": "Every discovered speaker — set its name and room.",
+                        "source": {
+                            "kind": "core_resource", "ref": "devices",
+                            "item_key": "device_id",
+                            "labels": { "title": "name", "subtitle": "device_id" }
+                        },
+                        "item": [
+                            { "key": "name", "kind": "text", "label": "Name" },
+                            { "key": "area", "kind": "select", "label": "Room",
+                              "placeholder": "Unassigned", "allow_create": true,
+                              "source": { "kind": "core_resource", "ref": "areas" } }
+                        ]
+                    }
+                ]
+            },
+            {
+                "id": "logging",
+                "title": "Logging",
+                "fields": [
+                    { "key": "logging.level", "kind": "text", "label": "Level",
+                      "default": "info",
+                      "placeholder": "info | debug | hc_sonos=debug" },
+                    { "key": "logging.log_forward_level", "kind": "enum",
+                      "render": "segmented", "label": "Forward to core", "default": "info",
+                      "options": [
+                          {"value": "off", "label": "Off"},
+                          {"value": "error", "label": "Error"},
+                          {"value": "warn", "label": "Warn"},
+                          {"value": "info", "label": "Info"},
+                          {"value": "debug", "label": "Debug"}
+                      ] }
+                ]
+            },
+            {
+                "id": "connection",
+                "title": "Connection",
+                "hidden": true,
+                "fields": [
+                    { "key": "homecore.broker_host", "kind": "host", "label": "Broker host" },
+                    { "key": "homecore.broker_port", "kind": "port", "label": "Broker port" },
+                    { "key": "homecore.password", "kind": "secret", "label": "Broker password" }
+                ]
+            }
+        ]
+    })
+}
+
 #[derive(Deserialize, Clone, Debug, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SonosConfig {

@@ -173,6 +173,11 @@ async fn try_start(
         None => mgmt,
     };
 
+    // Publish our own config descriptor — how the config should be presented
+    // (units, conditionals, live sources, prose), which the schema can't say.
+    // The editor renders this directly instead of inferring a form.
+    let mgmt = mgmt.with_config_descriptor(config::config_descriptor());
+
     // ── Spawn SDK event loop ─────────────────────────────────────────────
     let cmd_tx_clone = cmd_tx.clone();
     tokio::spawn(async move {
