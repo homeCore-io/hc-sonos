@@ -27,123 +27,143 @@ pub fn config_schema() -> Option<serde_json::Value> {
 /// this file's `[[devices]]` array: naming and room assignment belong to the
 /// device registry (core owns inventory), so those edits go to `/devices`.
 pub fn config_descriptor() -> serde_json::Value {
-    serde_json::json!({
-        "plugin_id": "plugin.sonos",
-        "descriptor_version": 1,
-        "title": "Sonos",
-        "sections": [
-            {
-                "id": "discovery",
-                "title": "Discovery",
-                "fields": [
-                    {
-                        "key": "sonos.discovery_interval_secs",
-                        "kind": "duration", "unit": "secs",
-                        "label": "Discovery interval", "default": 60, "min": 5,
-                        "help": "How often to re-run SSDP discovery."
-                    },
-                    {
-                        "key": "sonos.discovery_timeout_secs",
-                        "kind": "duration", "unit": "secs",
-                        "label": "Scan duration", "default": 5, "min": 1,
-                        "help": "How long each SSDP scan listens."
-                    },
-                    {
-                        "key": "sonos.manual_hosts",
-                        "kind": "list", "item": "host",
-                        "label": "Manual hosts", "default": [],
-                        "help": "Static speaker IPs to probe in addition to SSDP \
-                                 — useful across subnets where multicast is dropped."
-                    }
-                ]
-            },
-            {
-                "id": "api",
-                "title": "HTTP API",
-                "fields": [
-                    { "key": "api.enabled", "kind": "toggle",
-                      "label": "Enable HTTP API", "default": true },
-                    { "kind": "note",
-                      "text": "A standalone web interface (independent of homeCore) for \
-                               exploring each speaker — browse favorites and playlists, see \
-                               now-playing and group state, and read diagnostics. Handy for \
-                               content discovery and debugging.",
-                      "visible_when": { "field": "api.enabled", "truthy": true } },
-                    { "kind": "link", "label": "Open web interface",
-                      "help": "Opens the Sonos HTTP API in a new tab.",
-                      "href": "http://{client_host}:{api.port}/",
-                      "visible_when": { "field": "api.enabled", "truthy": true } },
-                    { "key": "api.host", "kind": "host", "label": "Bind address",
-                      "default": "0.0.0.0",
-                      "visible_when": { "field": "api.enabled", "truthy": true } },
-                    { "key": "api.port", "kind": "port", "label": "Port",
-                      "default": 5005,
-                      "visible_when": { "field": "api.enabled", "truthy": true } },
-                    { "key": "api.callback_host", "kind": "host",
-                      "label": "Callback host",
-                      "help": "The LAN IP speakers reach for GENA event callbacks.",
-                      "visible_when": { "field": "api.enabled", "truthy": true },
-                      "required_when": { "field": "api.host", "in": ["0.0.0.0", "::"] } },
-                    { "kind": "note",
-                      "text": "When the API binds all interfaces (0.0.0.0), speakers need a \
-                               concrete LAN IP to deliver event callbacks — set Callback host \
-                               to this machine's address.",
-                      "visible_when": { "field": "api.host", "in": ["0.0.0.0", "::"] } }
-                ]
-            },
-            {
-                "id": "speakers",
-                "title": "Speakers",
-                "fields": [
-                    {
-                        "key": "devices",
-                        "kind": "table", "render": "cards", "key_by": "device_id",
-                        "label": "Speakers",
-                        "help": "Every discovered speaker — set its name and room.",
-                        "source": {
-                            "kind": "core_resource", "ref": "devices",
-                            "item_key": "device_id",
-                            "labels": { "title": "name", "subtitle": "device_id" }
-                        },
-                        "item": [
-                            { "key": "name", "kind": "text", "label": "Name" },
-                            { "key": "area", "kind": "select", "label": "Room",
-                              "placeholder": "Unassigned", "allow_create": true,
-                              "source": { "kind": "core_resource", "ref": "areas" } }
-                        ]
-                    }
-                ]
-            },
-            {
-                "id": "logging",
-                "title": "Logging",
-                "fields": [
-                    { "key": "logging.level", "kind": "text", "label": "Level",
-                      "default": "info",
-                      "placeholder": "info | debug | hc_sonos=debug" },
-                    { "key": "logging.log_forward_level", "kind": "enum",
-                      "render": "segmented", "label": "Forward to core", "default": "info",
-                      "options": [
-                          {"value": "off", "label": "Off"},
-                          {"value": "error", "label": "Error"},
-                          {"value": "warn", "label": "Warn"},
-                          {"value": "info", "label": "Info"},
-                          {"value": "debug", "label": "Debug"}
-                      ] }
-                ]
-            },
-            {
-                "id": "connection",
-                "title": "Connection",
-                "hidden": true,
-                "fields": [
-                    { "key": "homecore.broker_host", "kind": "host", "label": "Broker host" },
-                    { "key": "homecore.broker_port", "kind": "port", "label": "Broker port" },
-                    { "key": "homecore.password", "kind": "secret", "label": "Broker password" }
-                ]
-            }
-        ]
-    })
+    use plugin_sdk_rs::config_descriptor::{Cond, Descriptor, Field, Section, Source};
+
+    // Speakers bind to the live device registry rather than this file's
+    // [[devices]] array: naming and room assignment belong to the device
+    // registry (core owns inventory), so those edits go to /devices.
+    let api_on = || Cond::truthy("api.enabled");
+    let binds_all = || Cond::one_of("api.host", ["0.0.0.0", "::"]);
+
+    Descriptor::new("plugin.sonos")
+        .title("Sonos")
+        .section(
+            Section::new("discovery", "Discovery")
+                .field(
+                    Field::duration("sonos.discovery_interval_secs")
+                        .label("Discovery interval")
+                        .unit("secs")
+                        .default(60)
+                        .min(5)
+                        .help("How often to re-run SSDP discovery."),
+                )
+                .field(
+                    Field::duration("sonos.discovery_timeout_secs")
+                        .label("Scan duration")
+                        .unit("secs")
+                        .default(5)
+                        .min(1)
+                        .help("How long each SSDP scan listens."),
+                )
+                .field(
+                    Field::list("sonos.manual_hosts", "host")
+                        .label("Manual hosts")
+                        .default(Vec::<String>::new())
+                        .help(
+                            "Static speaker IPs to probe in addition to SSDP \
+                             — useful across subnets where multicast is dropped.",
+                        ),
+                ),
+        )
+        .section(
+            Section::new("api", "HTTP API")
+                .field(
+                    Field::toggle("api.enabled")
+                        .label("Enable HTTP API")
+                        .default(true),
+                )
+                .field(
+                    Field::note(
+                        "A standalone web interface (independent of homeCore) for \
+                         exploring each speaker — browse favorites and playlists, see \
+                         now-playing and group state, and read diagnostics. Handy for \
+                         content discovery and debugging.",
+                    )
+                    .visible_when(api_on()),
+                )
+                .field(
+                    Field::link("Open web interface", "http://{client_host}:{api.port}/")
+                        .help("Opens the Sonos HTTP API in a new tab.")
+                        .visible_when(api_on()),
+                )
+                .field(
+                    Field::host("api.host")
+                        .label("Bind address")
+                        .default("0.0.0.0")
+                        .visible_when(api_on()),
+                )
+                .field(
+                    Field::port("api.port")
+                        .label("Port")
+                        .default(5005)
+                        .visible_when(api_on()),
+                )
+                .field(
+                    Field::host("api.callback_host")
+                        .label("Callback host")
+                        .help("The LAN IP speakers reach for GENA event callbacks.")
+                        .visible_when(api_on())
+                        .required_when(binds_all()),
+                )
+                .field(
+                    Field::note(
+                        "When the API binds all interfaces (0.0.0.0), speakers need a \
+                         concrete LAN IP to deliver event callbacks — set Callback host \
+                         to this machine's address.",
+                    )
+                    .visible_when(binds_all()),
+                ),
+        )
+        .section(
+            Section::new("speakers", "Speakers").field(
+                Field::table("devices")
+                    .label("Speakers")
+                    .render("cards")
+                    .key_by("device_id")
+                    .help("Every discovered speaker — set its name and room.")
+                    .source(
+                        Source::core_resource("devices")
+                            .item_key("device_id")
+                            .labels("name", "device_id"),
+                    )
+                    .columns([
+                        Field::text("name").label("Name"),
+                        Field::select("area")
+                            .label("Room")
+                            .placeholder("Unassigned")
+                            .allow_create()
+                            .source(Source::core_resource("areas")),
+                    ]),
+            ),
+        )
+        .section(
+            Section::new("logging", "Logging")
+                .field(
+                    Field::text("logging.level")
+                        .label("Level")
+                        .default("info")
+                        .placeholder("info | debug | hc_sonos=debug"),
+                )
+                .field(
+                    Field::enumeration("logging.log_forward_level")
+                        .label("Forward to core")
+                        .render("segmented")
+                        .default("info")
+                        .option("off", "Off")
+                        .option("error", "Error")
+                        .option("warn", "Warn")
+                        .option("info", "Info")
+                        .option("debug", "Debug"),
+                ),
+        )
+        .section(
+            Section::new("connection", "Connection")
+                .hidden()
+                .field(Field::host("homecore.broker_host").label("Broker host"))
+                .field(Field::port("homecore.broker_port").label("Broker port"))
+                .field(Field::secret("homecore.password").label("Broker password")),
+        )
+        .build()
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
