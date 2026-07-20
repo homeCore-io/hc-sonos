@@ -237,19 +237,38 @@ impl Default for SonosSection {
     }
 }
 
-/// A pre-configured speaker entry.  Any speaker discovered via SSDP that
-/// has a matching UUID will use these hc_id / name / area values instead of
-/// the auto-generated ones.
+/// A pre-configured speaker entry, matched to a discovered speaker by UUID.
+///
+/// **Only `hc_id` still takes effect.** It pins the speaker's homeCore device
+/// id, which must stay stable because rules and dashboards reference it.
+///
+/// `name` and `area` are **ignored**: the label now follows what Sonos itself
+/// reports, so renaming a speaker in the Sonos app reaches homeCore instead of
+/// being masked by a value written here once. To pin a label or a room against
+/// that sync, set the override in homeCore (`name_override` / `area_override`),
+/// which this plugin never touches. The fields are retained so existing config
+/// files keep parsing.
 #[derive(Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DeviceConfig {
     /// Sonos speaker UUID (e.g. "RINCON_347E5C3D12E401400").
     pub uuid: String,
-    /// HomeCore device ID (e.g. "sonos_living_room").
+    /// HomeCore device ID (e.g. "sonos_living_room"). The only field still
+    /// applied — it pins identity, which must stay stable for rules.
     pub hc_id: String,
-    /// Human-readable name surfaced in HomeCore.
+    /// Ignored. Retained so existing config files keep parsing; the label now
+    /// follows what Sonos reports. Pin one via homeCore's `name_override`.
+    #[allow(
+        dead_code,
+        reason = "kept for config back-compat; superseded by name_override"
+    )]
     pub name: String,
-    /// Optional room / area assignment.
+    /// Ignored. Retained for config back-compat; pin a room via homeCore's
+    /// `area_override` instead.
+    #[allow(
+        dead_code,
+        reason = "kept for config back-compat; superseded by area_override"
+    )]
     pub area: Option<String>,
 }
 

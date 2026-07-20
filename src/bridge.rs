@@ -160,17 +160,31 @@ impl Bridge {
             }
         };
 
-        let (hc_id, display_name, area): (String, String, Option<String>) =
-            if let Some(cfg) = self.config_map.get(&uuid) {
-                (cfg.hc_id.clone(), cfg.name.clone(), cfg.area.clone())
-            } else {
+        // A `[[devices]]` pin decides *identity* (`hc_id`), which must stay
+        // stable — rules and dashboards reference it. It no longer decides the
+        // *label*: the speaker's own name is what Sonos reports, so renaming it
+        // in the Sonos app now reaches homeCore instead of being masked forever
+        // by a value written into this file once. To pin a label against that
+        // sync, set a name override in homeCore (`name_override`), which the
+        // plugin never touches.
+        //
+        // `area` is likewise left to homeCore. Sonos has no room concept to
+        // sync: its "room name" IS the speaker name (`Office-1`, `Office-2` are
+        // two speakers in one office), so feeding it in would mint an area per
+        // speaker and split real rooms.
+        let hc_id = match self.config_map.get(&uuid) {
+            Some(cfg) => cfg.hc_id.clone(),
+            None => {
                 let sanitized: String = room_name
                     .to_lowercase()
                     .chars()
                     .map(|c| if c.is_alphanumeric() { c } else { '_' })
                     .collect();
-                (format!("sonos_{sanitized}"), room_name.clone(), None)
-            };
+                format!("sonos_{sanitized}")
+            }
+        };
+        let display_name = room_name.clone();
+        let area: Option<String> = None;
 
         info!(uuid, hc_id, room_name, "Registering new Sonos speaker");
 
