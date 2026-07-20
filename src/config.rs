@@ -149,11 +149,46 @@ pub fn config_descriptor() -> serde_json::Value {
                         .label("Forward to core")
                         .render("segmented")
                         .default("info")
+                        .help(
+                            "Minimum level forwarded to homeCore over MQTT; \
+                             anything below is written locally only.",
+                        )
                         .option("off", "Off")
                         .option("error", "Error")
                         .option("warn", "Warn")
                         .option("info", "Info")
                         .option("debug", "Debug"),
+                )
+                .field(
+                    Field::enumeration("logging.rotation")
+                        .label("Rotate")
+                        .render("segmented")
+                        .default("daily")
+                        .option("hourly", "Hourly")
+                        .option("daily", "Daily")
+                        .option("weekly", "Weekly")
+                        .option("never", "Never"),
+                )
+                .field(
+                    Field::int("logging.max_size_mb")
+                        .label("Rotate at size")
+                        .unit("MB")
+                        .default(100)
+                        .min(0)
+                        .help("Whichever comes first, this or the schedule. 0 disables size-based rotation."),
+                )
+                .field(
+                    Field::int("logging.prune_after_days")
+                        .label("Prune after")
+                        .unit("days")
+                        .default(0)
+                        .min(0)
+                        .help("Delete rotated files older than this. 0 = never prune."),
+                )
+                .field(
+                    Field::toggle("logging.compress")
+                        .label("Compress rotated files")
+                        .default(true),
                 ),
         )
         .section(
