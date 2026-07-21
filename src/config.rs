@@ -364,3 +364,38 @@ fn default_discovery_interval_secs() -> u64 {
 fn default_discovery_timeout_secs() -> u64 {
     5
 }
+
+#[cfg(all(test, feature = "schema"))]
+mod tests {
+    use super::*;
+
+    /// A published descriptor is *authoritative* — the editor renders it
+    /// instead of deriving from the schema — so any omitted config field
+    /// becomes uneditable. This plugin is where that bit: it shipped with 2 of
+    /// 6 `logging` fields declared, silently dropping the rest (`5bccebf`).
+    /// The check lives in the SDK; it went missing here.
+    #[test]
+    fn descriptor_covers_every_schema_field() {
+        let missing = plugin_sdk_rs::config_descriptor::missing_schema_coverage(
+            &config_schema().expect("schema feature is on"),
+            &config_descriptor(),
+            &[
+                // Bootstrap identity fixed at install, not an operator setting.
+                "homecore.plugin_id",
+                // The Speakers table binds to the live device registry, so its
+                // edits go to /devices and never reach this file's [[devices]]
+                // array. `uuid`/`hc_id` pin identity; `name`/`area` are inert,
+                // retained only so existing config files keep parsing (use
+                // homeCore's name_override / area_override instead).
+                "devices[].uuid",
+                "devices[].hc_id",
+                "devices[].name",
+                "devices[].area",
+            ],
+        );
+        assert!(
+            missing.is_empty(),
+            "config fields missing from the descriptor: {missing:?}"
+        );
+    }
+}
