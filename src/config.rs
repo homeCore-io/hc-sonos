@@ -111,7 +111,11 @@ pub fn config_descriptor() -> serde_json::Value {
                          concrete LAN IP to deliver event callbacks — set Callback host \
                          to this machine's address.",
                     )
-                    .visible_when(binds_all()),
+                    // Both conditions: this advises about Callback host, which
+                    // `api_on` hides. On `binds_all` alone the note outlived the
+                    // field it describes — switching the API off left behind
+                    // instructions pointing at a box no longer on screen.
+                    .visible_when(Cond::all([api_on(), binds_all()])),
                 ),
         )
         .section(
