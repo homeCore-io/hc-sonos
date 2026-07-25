@@ -201,6 +201,15 @@ impl Bridge {
         {
             warn!(hc_id, error = %e, "Failed to register device");
         }
+        // What the speaker reports, and what it can be told to do. Sonos takes
+        // no attribute-style writes, so every control lives in `actions`.
+        if let Err(e) = self
+            .publisher
+            .register_device_schema_json(&hc_id, &crate::actions::device_schema_json())
+            .await
+        {
+            warn!(hc_id, error = %e, "Failed to publish device schema");
+        }
         if let Err(e) = self.publisher.subscribe_commands(&hc_id).await {
             warn!(hc_id, error = %e, "Failed to subscribe to commands");
         }
