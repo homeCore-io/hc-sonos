@@ -26,7 +26,9 @@
 use std::collections::HashMap;
 
 use plugin_sdk_rs::device_actions::{with_actions, Action, Param, Source};
-use plugin_sdk_rs::types::schema::{AttributeKind, AttributeSchema, DeviceSchema};
+use plugin_sdk_rs::types::schema::{
+    AttributeKind, AttributeSchema, BoolStates, DeviceSchema, StateLabel,
+};
 use serde_json::Value;
 
 fn ro(kind: AttributeKind, display: &str) -> AttributeSchema {
@@ -35,12 +37,20 @@ fn ro(kind: AttributeKind, display: &str) -> AttributeSchema {
         // Never true on a Sonos — see the module note.
         writable: false,
         display_name: Some(display.to_string()),
-        unit: None,
-        min: None,
-        max: None,
-        step: None,
-        options: None,
+        ..Default::default()
     }
+}
+
+/// A read-only boolean whose two states have names.
+///
+/// A boolean attribute is two events, not one: a client given only "muted"
+/// offers one row and needs a Not gate for un-muting. Every bool here is
+/// read-only, so these are the words a *condition* reads.
+fn ro_bool(display: &str, on: (&str, &str), off: (&str, &str)) -> AttributeSchema {
+    ro(AttributeKind::Bool, display).with_states(BoolStates {
+        when_true: StateLabel::verbed(on.0, on.1),
+        when_false: StateLabel::verbed(off.0, off.1),
+    })
 }
 
 fn ro_unit(kind: AttributeKind, display: &str, unit: &str) -> AttributeSchema {
@@ -52,13 +62,29 @@ fn ro_unit(kind: AttributeKind, display: &str, unit: &str) -> AttributeSchema {
 fn attributes() -> DeviceSchema {
     let mut a: HashMap<String, AttributeSchema> = HashMap::new();
     a.insert("state".into(), ro(AttributeKind::String, "Playback"));
-    a.insert("volume".into(), ro_unit(AttributeKind::Integer, "Volume", "%"));
-    a.insert("muted".into(), ro(AttributeKind::Bool, "Muted"));
-    a.insert("shuffle".into(), ro(AttributeKind::Bool, "Shuffle"));
+    a.insert(
+        "volume".into(),
+        ro_unit(AttributeKind::Integer, "Volume", "%"),
+    );
+    a.insert(
+        "muted".into(),
+        ro_bool("Muted", ("muted", "is muted"), ("unmuted", "is unmuted")),
+    );
+    a.insert(
+        "shuffle".into(),
+        ro_bool(
+            "Shuffle",
+            ("shuffling", "starts shuffling"),
+            ("in order", "stops shuffling"),
+        ),
+    );
     a.insert("repeat".into(), ro(AttributeKind::String, "Repeat"));
     a.insert("bass".into(), ro(AttributeKind::Integer, "Bass"));
     a.insert("treble".into(), ro(AttributeKind::Integer, "Treble"));
-    a.insert("loudness".into(), ro(AttributeKind::Bool, "Loudness"));
+    a.insert(
+        "loudness".into(),
+        ro_bool("Loudness", ("on", "turns on"), ("off", "turns off")),
+    );
     a.insert(
         "group_coordinator".into(),
         ro(AttributeKind::String, "Group leader"),
@@ -288,6 +314,35 @@ const NOT_DECLARED: &[(&str, &str)] = &[(
 
 #[cfg(test)]
 mod tests {
+
+    /// Every boolean names both of its states.
+    ///
+    /// A boolean attribute is two events, not one: a client given only one
+    /// name offers one row, and the other direction needs a Not gate wrapped
+    /// round the trigger. Half-declaring is worse than not declaring, because
+    /// the client's own fallback lexicon is skipped for an attribute that then
+    /// has no second name.
+    #[test]
+    fn every_boolean_names_both_of_its_states() {
+        let schemas = [("sonos", attributes())];
+        for (label, schema) in schemas {
+            for (name, attr) in &schema.attributes {
+                if !matches!(attr.kind, AttributeKind::Bool) {
+                    continue;
+                }
+                let s = attr
+                    .states
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{label}.{name} is a bool with no state names"));
+                assert!(!s.when_true.label.is_empty(), "{label}.{name}");
+                assert!(!s.when_false.label.is_empty(), "{label}.{name}");
+                assert_ne!(
+                    s.when_true.label, s.when_false.label,
+                    "{label}.{name} names both states the same thing"
+                );
+            }
+        }
+    }
     use super::*;
     use std::collections::HashSet;
 
@@ -366,7 +421,10 @@ mod tests {
         let arms: HashSet<String> = dispatcher_arms().into_iter().collect();
         for a in device_actions() {
             let id = a.build()["id"].as_str().unwrap().to_string();
-            assert!(arms.contains(&id), "declared '{id}' with no arm to serve it");
+            assert!(
+                arms.contains(&id),
+                "declared '{id}' with no arm to serve it"
+            );
         }
     }
 
@@ -412,7 +470,10 @@ mod tests {
             "set_treble",
             "set_loudness",
         ] {
-            assert!(declared.contains(a), "supported_actions lists {a}, undeclared");
+            assert!(
+                declared.contains(a),
+                "supported_actions lists {a}, undeclared"
+            );
         }
         // ui_enrichments(): favorites, playlists, grouping, audio_eq.
         for a in ["play_favorite", "play_playlist", "join"] {
