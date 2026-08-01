@@ -22,7 +22,8 @@ use crate::events::NotifyEvent;
 use crate::shared_state::{AppState, SpeakerEntry};
 use crate::speaker::{self, SpeakerState};
 use crate::subscription;
-use plugin_sdk_rs::DevicePublisher;
+use plugin_sdk_rs::types::PluginNotice;
+use plugin_sdk_rs::{DevicePublisher, PluginNotices};
 
 const HEARTBEAT_SECS: u64 = 60;
 const ZONE_POLL_SECS: u64 = 300;
@@ -36,10 +37,19 @@ pub struct Bridge {
     /// Base URL for GENA callbacks, e.g. `"http://192.168.1.10:5005"`.
     callback_base: String,
     stale_after: Duration,
+    /// What the operator sees when discovery never turns anything up. Sonos is
+    /// found over SSDP, which a container bridge network does not carry — so
+    /// "active, zero speakers, forever" is a common and previously silent state.
+    notices: PluginNotices,
 }
 
 impl Bridge {
-    pub fn new(cfg: &SonosConfig, publisher: DevicePublisher, state: AppState) -> Self {
+    pub fn new(
+        cfg: &SonosConfig,
+        publisher: DevicePublisher,
+        state: AppState,
+        notices: PluginNotices,
+    ) -> Self {
         let config_map = cfg
             .devices
             .iter()
@@ -60,6 +70,7 @@ impl Bridge {
             publisher,
             callback_base,
             stale_after,
+            notices,
         }
     }
 
@@ -160,17 +171,31 @@ impl Bridge {
             }
         };
 
-        let (hc_id, display_name, area): (String, String, Option<String>) =
-            if let Some(cfg) = self.config_map.get(&uuid) {
-                (cfg.hc_id.clone(), cfg.name.clone(), cfg.area.clone())
-            } else {
+        // A `[[devices]]` pin decides *identity* (`hc_id`), which must stay
+        // stable — rules and dashboards reference it. It no longer decides the
+        // *label*: the speaker's own name is what Sonos reports, so renaming it
+        // in the Sonos app now reaches homeCore instead of being masked forever
+        // by a value written into this file once. To pin a label against that
+        // sync, set a name override in homeCore (`name_override`), which the
+        // plugin never touches.
+        //
+        // `area` is likewise left to homeCore. Sonos has no room concept to
+        // sync: its "room name" IS the speaker name (`Office-1`, `Office-2` are
+        // two speakers in one office), so feeding it in would mint an area per
+        // speaker and split real rooms.
+        let hc_id = match self.config_map.get(&uuid) {
+            Some(cfg) => cfg.hc_id.clone(),
+            None => {
                 let sanitized: String = room_name
                     .to_lowercase()
                     .chars()
                     .map(|c| if c.is_alphanumeric() { c } else { '_' })
                     .collect();
-                (format!("sonos_{sanitized}"), room_name.clone(), None)
-            };
+                format!("sonos_{sanitized}")
+            }
+        };
+        let display_name = room_name.clone();
+        let area: Option<String> = None;
 
         info!(uuid, hc_id, room_name, "Registering new Sonos speaker");
 
@@ -186,6 +211,15 @@ impl Bridge {
             .await
         {
             warn!(hc_id, error = %e, "Failed to register device");
+        }
+        // What the speaker reports, and what it can be told to do. Sonos takes
+        // no attribute-style writes, so every control lives in `actions`.
+        if let Err(e) = self
+            .publisher
+            .register_device_schema_json(&hc_id, &crate::actions::device_schema_json())
+            .await
+        {
+            warn!(hc_id, error = %e, "Failed to publish device schema");
         }
         if let Err(e) = self.publisher.subscribe_commands(&hc_id).await {
             warn!(hc_id, error = %e, "Failed to subscribe to commands");
@@ -299,6 +333,26 @@ impl Bridge {
     /// Ping every known speaker.  Mark offline on failure; re-subscribe and
     /// publish availability on recovery.
     async fn heartbeat(&mut self) {
+        // Discovery is continuous, so "none yet" is only worth reporting once
+        // the plugin has been up long enough for a sweep to have happened —
+        // the heartbeat is that cadence.
+        if self.state.read().await.speakers.is_empty() {
+            self.notices.raise(
+                PluginNotice::warning(
+                    "no_speakers_found",
+                    "No Sonos speakers have been found, so this plugin publishes nothing.",
+                )
+                .with_remedy(
+                    "Sonos is discovered over SSDP, which is multicast and does not \
+                     cross a container bridge network. If homeCore runs in a container, \
+                     put it on the host network for this plugin, or list the speakers \
+                     explicitly under Configuration.",
+                ),
+            );
+        } else {
+            self.notices.clear("no_speakers_found");
+        }
+
         let handles: Vec<(String, Speaker, bool)> = {
             let st = self.state.read().await;
             st.speakers

@@ -1,3 +1,4 @@
+mod actions;
 mod api;
 mod bridge;
 mod config;
@@ -121,6 +122,8 @@ async fn try_start(
         &cfg.logging.log_forward_level,
     );
     let publisher = client.device_publisher();
+    // Conditions for the plugin page, not only the log.
+    let notices = client.notices();
     let (cmd_tx, cmd_rx) = mpsc::channel::<(String, serde_json::Value)>(256);
 
     // ── Manual rediscover signal ──────────────────────────────────────────
@@ -165,6 +168,18 @@ async fn try_start(
                     }
                 },
             ));
+
+    // Publish the operator-config JSON Schema so the hc-web editor renders a
+    // typed form (rides on the capability manifest).
+    let mgmt = match config::config_schema() {
+        Some(schema) => mgmt.with_config_schema(schema),
+        None => mgmt,
+    };
+
+    // Publish our own config descriptor — how the config should be presented
+    // (units, conditionals, live sources, prose), which the schema can't say.
+    // The editor renders this directly instead of inferring a form.
+    let mgmt = mgmt.with_config_descriptor(config::config_descriptor());
 
     // ── Spawn SDK event loop ─────────────────────────────────────────────
     let cmd_tx_clone = cmd_tx.clone();
@@ -217,7 +232,7 @@ async fn try_start(
     );
 
     // ── Run bridge (blocks until command channel closes) ─────────────────
-    let bridge = bridge::Bridge::new(cfg, publisher, app_state);
+    let bridge = bridge::Bridge::new(cfg, publisher, app_state, notices);
     bridge.run(discovery_rx, cmd_rx, event_rx).await;
 
     Ok(())

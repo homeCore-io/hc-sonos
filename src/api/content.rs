@@ -46,6 +46,10 @@ fn parse_didl(xml: &str) -> Result<Vec<Value>> {
         .children()
         .filter(|n| n.is_element())
         .map(|item| {
+            // The DIDL <item> id attribute is the stable Sonos object ID
+            // (e.g. "FV:2/22" for favorites, "SQ:3" for playlists).
+            let id = item.attribute("id").unwrap_or("").to_string();
+
             let mut title    = String::new();
             let mut uri      = String::new();
             let mut art: Option<String> = None;
@@ -71,7 +75,7 @@ fn parse_didl(xml: &str) -> Result<Vec<Value>> {
                 )
             });
 
-            let mut obj = json!({ "title": title, "uri": uri, "metadata": metadata });
+            let mut obj = json!({ "id": id, "title": title, "uri": uri, "metadata": metadata });
             if let Some(a) = art { obj["albumArtUri"] = json!(a); }
             obj
         })
