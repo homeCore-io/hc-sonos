@@ -22,7 +22,8 @@ use crate::events::NotifyEvent;
 use crate::shared_state::{AppState, SpeakerEntry};
 use crate::speaker::{self, SpeakerState};
 use crate::subscription;
-use plugin_sdk_rs::DevicePublisher;
+use plugin_sdk_rs::types::PluginNotice;
+use plugin_sdk_rs::{DevicePublisher, PluginNotices};
 
 const HEARTBEAT_SECS: u64 = 60;
 const ZONE_POLL_SECS: u64 = 300;
@@ -36,10 +37,19 @@ pub struct Bridge {
     /// Base URL for GENA callbacks, e.g. `"http://192.168.1.10:5005"`.
     callback_base: String,
     stale_after: Duration,
+    /// What the operator sees when discovery never turns anything up. Sonos is
+    /// found over SSDP, which a container bridge network does not carry — so
+    /// "active, zero speakers, forever" is a common and previously silent state.
+    notices: PluginNotices,
 }
 
 impl Bridge {
-    pub fn new(cfg: &SonosConfig, publisher: DevicePublisher, state: AppState) -> Self {
+    pub fn new(
+        cfg: &SonosConfig,
+        publisher: DevicePublisher,
+        state: AppState,
+        notices: PluginNotices,
+    ) -> Self {
         let config_map = cfg
             .devices
             .iter()
@@ -60,6 +70,7 @@ impl Bridge {
             publisher,
             callback_base,
             stale_after,
+            notices,
         }
     }
 
@@ -322,6 +333,26 @@ impl Bridge {
     /// Ping every known speaker.  Mark offline on failure; re-subscribe and
     /// publish availability on recovery.
     async fn heartbeat(&mut self) {
+        // Discovery is continuous, so "none yet" is only worth reporting once
+        // the plugin has been up long enough for a sweep to have happened —
+        // the heartbeat is that cadence.
+        if self.state.read().await.speakers.is_empty() {
+            self.notices.raise(
+                PluginNotice::warning(
+                    "no_speakers_found",
+                    "No Sonos speakers have been found, so this plugin publishes nothing.",
+                )
+                .with_remedy(
+                    "Sonos is discovered over SSDP, which is multicast and does not \
+                     cross a container bridge network. If homeCore runs in a container, \
+                     put it on the host network for this plugin, or list the speakers \
+                     explicitly under Configuration.",
+                ),
+            );
+        } else {
+            self.notices.clear("no_speakers_found");
+        }
+
         let handles: Vec<(String, Speaker, bool)> = {
             let st = self.state.read().await;
             st.speakers

@@ -122,6 +122,8 @@ async fn try_start(
         &cfg.logging.log_forward_level,
     );
     let publisher = client.device_publisher();
+    // Conditions for the plugin page, not only the log.
+    let notices = client.notices();
     let (cmd_tx, cmd_rx) = mpsc::channel::<(String, serde_json::Value)>(256);
 
     // ── Manual rediscover signal ──────────────────────────────────────────
@@ -230,7 +232,7 @@ async fn try_start(
     );
 
     // ── Run bridge (blocks until command channel closes) ─────────────────
-    let bridge = bridge::Bridge::new(cfg, publisher, app_state);
+    let bridge = bridge::Bridge::new(cfg, publisher, app_state, notices);
     bridge.run(discovery_rx, cmd_rx, event_rx).await;
 
     Ok(())
