@@ -4,6 +4,26 @@
 
 `hc-sonos` bridges Sonos speakers into HomeCore as `device_type=media_player` devices.
 
+## Setup
+
+Install it from the web UI — **Plugins → Add**. Speakers on the local network
+are discovered automatically; there is nothing to configure beyond the broker
+connection, and no `[[plugins]]` block to write.
+
+Discovery is SSDP multicast, which a Docker **bridge** network does not carry —
+and Sonos additionally serves UPnP event callbacks, so it has to advertise an
+address the speakers can reach back on, which a NATed container IP is not. Use
+host networking if you are running in Docker.
+
+## Notices
+
+Problems are reported as **notices**, shown on the plugin's card in the web
+UI. They are state rather than log lines.
+
+| Code | Means |
+|---|---|
+| `no_speakers_found` | A discovery sweep finished with nothing found — usually the bridge-network problem above. Clears as soon as a speaker appears. |
+
 ## Published HomeCore state
 
 Each speaker publishes a generic media-player contract intended for shared client UI:
