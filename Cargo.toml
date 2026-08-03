@@ -12,11 +12,11 @@ path = "src/main.rs"
 
 [dependencies]
 schemars           = { version = "0.8", optional = true }
-plugin-sdk-rs      = { git = "https://github.com/homeCore-io/hc-plugin-sdk-rs", tag = "v0.3.10" }
+plugin-sdk-rs      = { git = "https://github.com/homeCore-io/hc-plugin-sdk-rs", tag = "v0.4.0" }
 tokio              = { version = "1", features = ["full"] }
 serde              = { version = "1", features = ["derive"] }
 serde_json         = "1"
-toml               = "0.8"
+toml               = "1"
 anyhow             = "1"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry"] }
@@ -26,10 +26,10 @@ chrono             = "0.4"
 sonor              = "2.0"
 futures            = "0.3"
 axum               = "0.7"
-tower              = "0.4"
-tower-http         = { version = "0.5", features = ["cors", "trace"] }
+tower              = "0.5"
+tower-http         = { version = "0.7", features = ["cors", "trace"] }
 roxmltree          = "0.18"
 
 [features]
 default = ["schema"]
-schema = ["dep:schemars"]
+schema = ["dep:schemars", "plugin-sdk-rs/schema"]
